@@ -1,0 +1,55 @@
+# Pion STUN/TURN Server Development Configuration
+# This file demonstrates the correct MongoDB URI format for local development
+# with Docker Compose authentication
+
+server:
+  stun:
+    port: 3478
+    address: "0.0.0.0"
+  
+  turn:
+    port: 3479
+    address: "0.0.0.0"
+    realm: "pion-stun-turn"
+    public_ip: ""  # Set to your public IP for production
+    relay_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    max_lifetime: 3600  # seconds
+    default_ttl: 600    # seconds
+  
+  health:
+    port: 8080
+    address: "0.0.0.0"
+    path: "/health"
+
+mongodb:
+  # MongoDB URI with authentication for Docker Compose setup
+  # Format: mongodb://username:password@host:port/database?authSource=admin
+  uri: "mongodb://admin:password@localhost:27017/stun_turn?authSource=admin"
+  database: "stun_turn"
+  collection: "users"
+  
+  # Customizable field names for authentication
+  fields:
+    username: "username"
+    password: "password"
+    enabled: "enabled"
+    salt: "salt"
+  
+  # Connection options
+  options:
+    max_pool_size: 10
+    min_pool_size: 1
+    connect_timeout: 10      # seconds
+    server_selection_timeout: 5  # seconds
+
+logging:
+  level: "info"     # trace, debug, info, warn, error, fatal, panic
+  format: "json"    # json, text
+  output: "stdout"  # stdout, stderr, file path
+
+security:
+  password_hash_cost: 12
+  secret_key: "your-secret-key-here"

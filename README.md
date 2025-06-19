@@ -164,6 +164,45 @@ mongodb:
     enabled: "is_active"       # 自定义启用状态字段
 ```
 
+### Docker Compose MongoDB 认证配置
+
+如果您使用 Docker Compose 启动 MongoDB（如本项目的 docker-compose.yml），MongoDB 会启用认证。您需要在配置文件中提供正确的认证信息：
+
+```yaml
+mongodb:
+  # 包含认证信息的 MongoDB URI
+  uri: "mongodb://admin:password@localhost:27017/stun_turn?authSource=admin"
+  database: "stun_turn"
+  collection: "users"
+```
+
+**重要说明**：
+- `admin:password` 是 Docker Compose 中配置的用户名和密码
+- `authSource=admin` 指定认证数据库为 admin
+- 如果不提供认证信息，会出现 `(Unauthorized) command createIndexes requires authentication` 错误
+
+参考 `configs/config.dev.yaml` 文件查看完整的开发环境配置示例。
+
+## 故障排除
+
+### MongoDB 认证错误
+
+**错误信息**：
+```
+failed to create indexes: failed to create username index: (Unauthorized) command createIndexes requires authentication
+```
+
+**解决方案**：
+1. 确保 MongoDB URI 包含正确的认证信息
+2. 检查用户名、密码和认证数据库是否正确
+3. 确认 MongoDB 容器已完全启动（等待 10-15 秒）
+
+**正确的配置示例**：
+```yaml
+mongodb:
+  uri: "mongodb://admin:password@localhost:27017/stun_turn?authSource=admin"
+```
+
 ## API 端点
 
 ### 健康检查端点

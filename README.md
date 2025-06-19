@@ -86,7 +86,18 @@ cp configs/config.example.yaml configs/config.yaml
 # 编辑 configs/config.yaml 设置您的配置
 ```
 
-5. 运行服务器:
+**重要**: 对于 Docker Compose MongoDB，请确保 `configs/config.yaml` 包含正确的认证信息：
+```yaml
+mongodb:
+  uri: "mongodb://admin:password@localhost:27017/stun_turn?authSource=admin"
+```
+
+5. 检查配置（可选但推荐）:
+```bash
+./scripts/check-config.sh
+```
+
+6. 运行服务器:
 ```bash
 go run cmd/server/main.go
 ```
@@ -271,6 +282,50 @@ logging:
 ```
 
 ## 故障排除
+
+### 配置文件问题
+
+**错误信息**：
+```
+configuration file not found
+```
+
+**解决方案**：
+1. 运行配置检查工具：`./scripts/check-config.sh`
+2. 创建配置文件：`cp configs/config.dev.yaml configs/config.yaml`
+3. 或指定配置文件路径：`go run cmd/server/main.go -config /path/to/config.yaml`
+
+### MongoDB 认证错误
+
+**错误信息**：
+```
+failed to create indexes: failed to create username index: (Unauthorized) command createIndexes requires authentication
+```
+
+**解决方案**：
+1. 运行配置检查工具：`./scripts/check-config.sh`
+2. 确保 MongoDB URI 包含正确的认证信息
+3. 检查用户名、密码和认证数据库是否正确
+4. 确认 MongoDB 容器已完全启动（等待 10-15 秒）
+
+**正确的配置示例**：
+```yaml
+mongodb:
+  uri: "mongodb://admin:password@localhost:27017/stun_turn?authSource=admin"
+```
+
+### 使用配置检查工具
+
+运行配置检查工具来诊断常见问题：
+```bash
+./scripts/check-config.sh
+```
+
+该工具会检查：
+- 配置文件是否存在
+- MongoDB URI 格式是否正确
+- Docker 容器是否运行
+- MongoDB 连接是否正常
 
 ### 常见问题
 

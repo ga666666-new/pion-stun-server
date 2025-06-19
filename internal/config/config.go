@@ -105,9 +105,36 @@ func Load(configPath string) (*Config, error) {
 
 	// Read configuration file
 	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			// Configuration file not found - provide helpful error message
+			if configPath != "" {
+				return nil, fmt.Errorf("configuration file not found: %s\n\nPlease ensure the file exists and is readable", configPath)
+			}
+			return nil, fmt.Errorf("configuration file not found\n\n"+
+				"Please create a configuration file at one of these locations:\n"+
+				"  - ./configs/config.yaml\n"+
+				"  - ./config.yaml\n\n"+
+				"You can:\n"+
+				"  1. Copy the example: cp configs/config.example.yaml configs/config.yaml\n"+
+				"  2. Use the development template: cp configs/config.dev.yaml configs/config.yaml\n"+
+				"  3. Specify a custom path: go run cmd/server/main.go -config /path/to/config.yaml\n\n"+
+				"IMPORTANT: For Docker Compose MongoDB, ensure your config.yaml contains:\n"+
+				"  mongodb:\n"+
+				"    uri: \"mongodb://admin:password@localhost:27017/stun_turn?authSource=admin\"")
 		}
+		// Check if it's a file not found error when config path is specified
+		if configPath != "" && strings.Contains(err.Error(), "no such file or directory") {
+			return nil, fmt.Errorf("configuration file not found: %s\n\n"+
+				"Please ensure the file exists and is readable.\n\n"+
+				"You can:\n"+
+				"  1. Create the file at the specified path\n"+
+				"  2. Use an existing config: go run cmd/server/main.go -config configs/config.dev.yaml\n"+
+				"  3. Use the default location: cp configs/config.dev.yaml configs/config.yaml\n\n"+
+				"IMPORTANT: For Docker Compose MongoDB, ensure your config.yaml contains:\n"+
+				"  mongodb:\n"+
+				"    uri: \"mongodb://admin:password@localhost:27017/stun_turn?authSource=admin\"", configPath)
+		}
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
 	var config Config

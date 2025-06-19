@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: pion-stun-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: stun_turn
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - stun-turn-network
+
+  pion-stun-server:
+    build: .
+    container_name: pion-stun-server
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+    ports:
+      - "3478:3478/udp"  # STUN
+      - "3479:3479/udp"  # TURN UDP
+      - "3479:3479/tcp"  # TURN TCP
+      - "8080:8080/tcp"  # Health check
+    environment:
+      - MONGODB_URI=mongodb://admin:password@mongodb:27017/stun_turn?authSource=admin
+      - LOGGING_LEVEL=info
+    volumes:
+      - ./configs/config.yaml:/app/configs/config.yaml:ro
+    networks:
+      - stun-turn-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: MongoDB Express for database management
+  mongo-express:
+    image: mongo-express:latest
+    container_name: pion-stun-mongo-express
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: password
+      ME_CONFIG_MONGODB_URL: mongodb://admin:password@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    networks:
+      - stun-turn-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  stun-turn-network:
+    driver: bridge

@@ -1,0 +1,25 @@
+stun:
+  address: "127.0.0.1"
+  port: 3478
+
+turn:
+  address: "127.0.0.1"
+  port: 3479
+  realm: "test.example.com"
+  public_ip: "127.0.0.1"
+
+mongodb:
+  uri: "mongodb://localhost:27017"
+  database: "test_stun_server"
+  collection: "users"
+  fields:
+    username: "username"
+    password: "password"
+    enabled: "enabled"
+
+health:
+  address: "127.0.0.1"
+  port: 8080
+
+logging:
+  level: "info"

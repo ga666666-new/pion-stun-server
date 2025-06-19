@@ -37,12 +37,23 @@ func NewMongoAuthenticator(cfg *config.MongoDBConfig) (*MongoAuthenticator, erro
 	// Connect to MongoDB
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
+		return nil, fmt.Errorf("failed to connect to MongoDB: %w\n\n"+
+			"Common solutions:\n"+
+			"  1. Ensure MongoDB is running: docker-compose up -d mongodb\n"+
+			"  2. Check MongoDB URI format in config.yaml\n"+
+			"  3. For Docker Compose, use: mongodb://admin:password@localhost:27017/stun_turn?authSource=admin", err)
 	}
 
 	// Ping to verify connection
 	if err := client.Ping(ctx, nil); err != nil {
-		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
+		return nil, fmt.Errorf("failed to ping MongoDB: %w\n\n"+
+			"This usually indicates:\n"+
+			"  1. MongoDB is not running or not accessible\n"+
+			"  2. Authentication credentials are incorrect\n"+
+			"  3. Network connectivity issues\n\n"+
+			"For Docker Compose MongoDB, ensure your config.yaml contains:\n"+
+			"  mongodb:\n"+
+			"    uri: \"mongodb://admin:password@localhost:27017/stun_turn?authSource=admin\"", err)
 	}
 
 	database := client.Database(cfg.Database)
@@ -276,7 +287,17 @@ func (m *MongoAuthenticator) createIndexes(ctx context.Context) error {
 
 	_, err := m.collection.Indexes().CreateOne(ctx, indexModel)
 	if err != nil {
-		return fmt.Errorf("failed to create username index: %w", err)
+		return fmt.Errorf("failed to create username index: %w\n\n"+
+			"This error commonly occurs when:\n"+
+			"  1. MongoDB authentication is not configured properly\n"+
+			"  2. The user lacks permissions to create indexes\n"+
+			"  3. The MongoDB URI is missing authentication credentials\n\n"+
+			"For Docker Compose MongoDB, ensure your config.yaml contains:\n"+
+			"  mongodb:\n"+
+			"    uri: \"mongodb://admin:password@localhost:27017/stun_turn?authSource=admin\"\n\n"+
+			"The URI must include:\n"+
+			"  - Username and password (admin:password)\n"+
+			"  - Authentication source (?authSource=admin)", err)
 	}
 
 	// Create index on enabled field if configured

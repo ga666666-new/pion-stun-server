@@ -242,6 +242,40 @@ func (m *MongoAuthenticator) GetUser(ctx context.Context, userID primitive.Objec
 	return m.resultToUser(result)
 }
 
+// GetTURNAuthKey retrieves the pre-computed TURN auth key for a user.
+// The key stored in the database is expected to be MD5(username:realm:password).
+func (m *MongoAuthenticator) GetTURNAuthKey(ctx context.Context, username string) (string, *models.User, error) {
+	filter := bson.M{
+		m.config.Fields.Username: username,
+	}
+
+	var result bson.M
+	err := m.collection.FindOne(ctx, filter).Decode(&result)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return "", nil, fmt.Errorf("user not found")
+		}
+		return "", nil, fmt.Errorf("database query failed: %w", err)
+	}
+
+	// Extract password (which is the TURN key) from result
+	storedKey, ok := result[m.config.Fields.Password].(string)
+	if !ok {
+		return "", nil, fmt.Errorf("invalid key field type in db")
+	}
+
+	user, err := m.resultToUser(result)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to convert user data: %w", err)
+	}
+
+	if !user.Enabled {
+		return "", nil, fmt.Errorf("user is disabled")
+	}
+
+	return storedKey, user, nil
+}
+
 // ListUsers retrieves all users with pagination
 func (m *MongoAuthenticator) ListUsers(ctx context.Context, offset, limit int) ([]*models.User, error) {
 	opts := options.Find()

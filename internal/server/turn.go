@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"sync"
@@ -127,19 +128,16 @@ func (t *TURNServer) handleAuth(username, realm string, srcAddr net.Addr) (key [
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	
-	// For TURN authentication, we expect username:password format
-	// In production, you might want to implement proper TURN credential generation
-	password := username // Simplified - use username as password for testing
-	
-	// Authenticate with MongoDB
-	user, err := t.auth.Authenticate(ctx, username, password)
+	storedKey, user, err := t.auth.GetTURNAuthKey(ctx, username)
 	if err != nil {
 		logger.WithError(err).Debug("Authentication failed")
 		return nil, false
 	}
 	
-	if !user.Enabled {
-		logger.Debug("User is disabled")
+	// The stored key is hex-encoded, decode it for pion/turn
+	decodedKey, err := hex.DecodeString(storedKey)
+	if err != nil {
+		logger.WithError(err).Error("Failed to decode stored TURN key")
 		return nil, false
 	}
 	
@@ -165,8 +163,7 @@ func (t *TURNServer) handleAuth(username, realm string, srcAddr net.Addr) (key [
 	t.sessions[sessionID] = session
 	t.sessionsMutex.Unlock()
 	
-	// Return password as key for TURN authentication
-	return []byte(password), true
+	return decodedKey, true
 }
 
 // sessionCleanup periodically cleans up inactive sessions

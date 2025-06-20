@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
@@ -11,7 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/ga666666-new/pion-stun-server/internal/config"
 )
@@ -106,17 +107,15 @@ func addUser(ctx context.Context, collection *mongo.Collection, cfg *config.Conf
 		return fmt.Errorf("user '%s' already exists", username)
 	}
 
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("failed to hash password: %w", err)
-	}
+	// For TURN's long-term authentication, the 'password' is the MD5 hash of "username:realm:password"
+	key := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, cfg.Turn.Realm, password)))
+	hashedPassword := hex.EncodeToString(key[:])
 
 	// Create user document
 	now := time.Now()
 	user := bson.M{
 		cfg.MongoDB.Fields.Username: username,
-		cfg.MongoDB.Fields.Password: string(hashedPassword),
+		cfg.MongoDB.Fields.Password: hashedPassword,
 		cfg.MongoDB.Fields.Enabled:  enabled,
 		"created_at":                now,
 		"updated_at":                now,
@@ -192,11 +191,9 @@ func updateUser(ctx context.Context, collection *mongo.Collection, cfg *config.C
 
 	// Update password if provided
 	if password != "" {
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if err != nil {
-			return fmt.Errorf("failed to hash password: %w", err)
-		}
-		update["$set"].(bson.M)[cfg.MongoDB.Fields.Password] = string(hashedPassword)
+		key := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, cfg.Turn.Realm, password)))
+		hashedPassword := hex.EncodeToString(key[:])
+		update["$set"].(bson.M)[cfg.MongoDB.Fields.Password] = hashedPassword
 	}
 
 	result, err := collection.UpdateOne(ctx, filter, update)

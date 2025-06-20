@@ -108,7 +108,7 @@ func addUser(ctx context.Context, collection *mongo.Collection, cfg *config.Conf
 	}
 
 	// For TURN's long-term authentication, the 'password' is the MD5 hash of "username:realm:password"
-	key := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, cfg.Turn.Realm, password)))
+	key := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, cfg.Server.TURN.Realm, password)))
 	hashedPassword := hex.EncodeToString(key[:])
 
 	// Create user document
@@ -165,7 +165,7 @@ func listUsers(ctx context.Context, collection *mongo.Collection, cfg *config.Co
 		username := result[cfg.MongoDB.Fields.Username]
 		enabled := result[cfg.MongoDB.Fields.Enabled]
 		createdAt := result["created_at"]
-		
+
 		fmt.Printf("Username: %s, Enabled: %v, Created: %v\n", username, enabled, createdAt)
 		count++
 	}
@@ -181,7 +181,7 @@ func listUsers(ctx context.Context, collection *mongo.Collection, cfg *config.Co
 
 func updateUser(ctx context.Context, collection *mongo.Collection, cfg *config.Config, username, password string, enabled bool) error {
 	filter := bson.M{cfg.MongoDB.Fields.Username: username}
-	
+
 	update := bson.M{
 		"$set": bson.M{
 			cfg.MongoDB.Fields.Enabled: enabled,
@@ -191,7 +191,7 @@ func updateUser(ctx context.Context, collection *mongo.Collection, cfg *config.C
 
 	// Update password if provided
 	if password != "" {
-		key := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, cfg.Turn.Realm, password)))
+		key := md5.Sum([]byte(fmt.Sprintf("%s:%s:%s", username, cfg.Server.TURN.Realm, password)))
 		hashedPassword := hex.EncodeToString(key[:])
 		update["$set"].(bson.M)[cfg.MongoDB.Fields.Password] = hashedPassword
 	}

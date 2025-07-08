@@ -46,7 +46,7 @@ mongodb:
     server_selection_timeout: 5  # seconds
 
 logging:
-  level: "info"     # trace, debug, info, warn, error, fatal, panic
+  level: "trace"     # trace, debug, info, warn, error, fatal, panic
   format: "json"    # json, text
   output: "stdout"  # stdout, stderr, file path
 

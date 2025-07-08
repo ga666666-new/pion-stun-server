@@ -18,7 +18,7 @@ import (
 )
 
 var (
-	configPath = flag.String("config", "", "Path to configuration file")
+	configPath = flag.String("config", "configs/config.dev.yaml", "Path to configuration file")
 	version    = "1.0.0"
 	buildTime  = "unknown"
 	gitCommit  = "unknown"

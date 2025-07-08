@@ -19,7 +19,7 @@ func TestConfigLoad(t *testing.T) {
 	// Verify default values
 	assert.Equal(t, 3478, cfg.Server.STUN.Port)
 	assert.Equal(t, 3479, cfg.Server.TURN.Port)
-	assert.Equal(t, 8080, cfg.Server.Health.Port)
+	assert.Equal(t, 3480, cfg.Server.Health.Port)
 	assert.Equal(t, "mongodb://localhost:27017", cfg.MongoDB.URI)
 	assert.Equal(t, "stun_turn", cfg.MongoDB.Database)
 	assert.Equal(t, "users", cfg.MongoDB.Collection)

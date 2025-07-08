@@ -97,6 +97,34 @@ func (t *TURNServer) Start() error {
 				RelayAddressGenerator: relayAddressGenerator,
 			},
 		},
+		// Add callbacks for logging
+		OnAllocateSuccess: func(src, relayed net.Addr) {
+			t.logger.WithFields(logrus.Fields{
+				"src":     src.String(),
+				"relayed": relayed.String(),
+			}).Info("TURN allocation successful")
+		},
+		OnAllocateFailure: func(src net.Addr, err error) {
+			t.logger.WithFields(logrus.Fields{
+				"src":   src.String(),
+				"error": err,
+			}).Error("TURN allocation failed")
+		},
+		OnRelaySuccess: func(src, dst, relayed net.Addr, bytes int) {
+			t.logger.WithFields(logrus.Fields{
+				"src":     src.String(),
+				"dst":     dst.String(),
+				"relayed": relayed.String(),
+				"bytes":   bytes,
+			}).Trace("Packet relayed successfully")
+		},
+		OnRelayFailure: func(src, dst net.Addr, err error) {
+			t.logger.WithFields(logrus.Fields{
+				"src":   src.String(),
+				"dst":   dst.String(),
+				"error": err,
+			}).Warn("Packet relay failed")
+		},
 	}
 
 	// Create TURN server

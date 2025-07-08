@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	pionlogger "github.com/pion/logging"
 	"github.com/pion/stun"
 	"github.com/pion/turn/v2"
 	"github.com/sirupsen/logrus"
@@ -16,6 +17,53 @@ import (
 	"github.com/ga666666-new/pion-stun-server/internal/config"
 	"github.com/ga666666-new/pion-stun-server/pkg/models"
 )
+
+// turnLeveledLogger is a simple adapter to use logrus with pion's logger interface
+type turnLeveledLogger struct {
+	entry *logrus.Entry
+}
+
+func (l *turnLeveledLogger) Trace(msg string) {
+	l.entry.Trace(msg)
+}
+func (l *turnLeveledLogger) Tracef(format string, args ...interface{}) {
+	l.entry.Tracef(format, args...)
+}
+func (l *turnLeveledLogger) Debug(msg string) {
+	l.entry.Debug(msg)
+}
+func (l *turnLeveledLogger) Debugf(format string, args ...interface{}) {
+	l.entry.Debugf(format, args...)
+}
+func (l *turnLeveledLogger) Info(msg string) {
+	l.entry.Info(msg)
+}
+func (l *turnLeveledLogger) Infof(format string, args ...interface{}) {
+	l.entry.Infof(format, args...)
+}
+func (l *turnLeveledLogger) Warn(msg string) {
+	l.entry.Warn(msg)
+}
+func (l *turnLeveledLogger) Warnf(format string, args ...interface{}) {
+	l.entry.Warnf(format, args...)
+}
+func (l *turnLeveledLogger) Error(msg string) {
+	l.entry.Error(msg)
+}
+func (l *turnLeveledLogger) Errorf(format string, args ...interface{}) {
+	l.entry.Errorf(format, args...)
+}
+
+// turnLoggerFactory creates new loggers for the pion/turn library
+type turnLoggerFactory struct {
+	logger *logrus.Logger
+}
+
+func (f *turnLoggerFactory) NewLogger(scope string) pionlogger.LeveledLogger {
+	return &turnLeveledLogger{
+		entry: f.logger.WithField("scope", scope),
+	}
+}
 
 // TURNServer represents a TURN server
 type TURNServer struct {
@@ -68,6 +116,9 @@ func (t *TURNServer) Start() error {
 		Address:      "0.0.0.0",
 	}
 
+	// Create logger factory for pion
+	loggerFactory := &turnLoggerFactory{logger: t.logger}
+
 	// Listen on UDP
 	udpListener, err := net.ListenPacket("udp4", addr)
 	if err != nil {
@@ -83,8 +134,9 @@ func (t *TURNServer) Start() error {
 
 	// Create TURN server configuration
 	serverConfig := turn.ServerConfig{
-		Realm:       t.config.Realm,
-		AuthHandler: t.handleAuth,
+		Realm:         t.config.Realm,
+		AuthHandler:   t.handleAuth,
+		LoggerFactory: loggerFactory,
 		PacketConnConfigs: []turn.PacketConnConfig{
 			{
 				PacketConn:            udpListener,
@@ -96,34 +148,6 @@ func (t *TURNServer) Start() error {
 				Listener:              tcpListener,
 				RelayAddressGenerator: relayAddressGenerator,
 			},
-		},
-		// Add callbacks for logging
-		OnAllocateSuccess: func(src, relayed net.Addr) {
-			t.logger.WithFields(logrus.Fields{
-				"src":     src.String(),
-				"relayed": relayed.String(),
-			}).Info("TURN allocation successful")
-		},
-		OnAllocateFailure: func(src net.Addr, err error) {
-			t.logger.WithFields(logrus.Fields{
-				"src":   src.String(),
-				"error": err,
-			}).Error("TURN allocation failed")
-		},
-		OnRelaySuccess: func(src, dst, relayed net.Addr, bytes int) {
-			t.logger.WithFields(logrus.Fields{
-				"src":     src.String(),
-				"dst":     dst.String(),
-				"relayed": relayed.String(),
-				"bytes":   bytes,
-			}).Trace("Packet relayed successfully")
-		},
-		OnRelayFailure: func(src, dst net.Addr, err error) {
-			t.logger.WithFields(logrus.Fields{
-				"src":   src.String(),
-				"dst":   dst.String(),
-				"error": err,
-			}).Warn("Packet relay failed")
 		},
 	}
 

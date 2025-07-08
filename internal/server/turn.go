@@ -137,6 +137,7 @@ func (t *TURNServer) Start() error {
 		Realm:         t.config.Realm,
 		AuthHandler:   t.handleAuth,
 		LoggerFactory: loggerFactory,
+		PortRange: "49152-65535",
 		InboundMTU:    1500, // This is a workaround to enable automatic permissions.
 		PacketConnConfigs: []turn.PacketConnConfig{
 			{

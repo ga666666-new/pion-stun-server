@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pion/stun"
 	"github.com/pion/turn/v2"
 	"github.com/sirupsen/logrus"
 
@@ -41,32 +42,45 @@ func NewTURNServer(cfg *config.TURNConfig, authenticator *auth.MongoAuthenticato
 // Start starts the TURN server
 func (t *TURNServer) Start() error {
 	addr := fmt.Sprintf("%s:%d", t.config.Address, t.config.Port)
-	
-	// Create relay address generator
-	relayAddressGenerator := &turn.RelayAddressGeneratorStatic{
-		RelayAddress: net.ParseIP("127.0.0.1"), // Use localhost for testing
-		Address:      "0.0.0.0",
-	}
-	
+
+	var relayAddress net.IP
 	if t.config.PublicIP != "" {
-		if publicIP := net.ParseIP(t.config.PublicIP); publicIP != nil {
-			relayAddressGenerator.RelayAddress = publicIP
+		relayAddress = net.ParseIP(t.config.PublicIP)
+		if relayAddress == nil {
+			return fmt.Errorf("invalid public_ip address: %s", t.config.PublicIP)
+		}
+		t.logger.WithField("ip", relayAddress.String()).Info("Using configured public IP")
+	} else {
+		t.logger.Info("Public IP not configured, attempting to discover using STUN")
+		discoveredIP, err := discoverPublicIP(t.logger)
+		if err != nil {
+			t.logger.WithError(err).Warn("Failed to discover public IP, falling back to 127.0.0.1. TURN will likely not work externally.")
+			relayAddress = net.ParseIP("127.0.0.1")
+		} else {
+			relayAddress = discoveredIP
+			t.logger.WithField("ip", relayAddress.String()).Info("Discovered public IP")
 		}
 	}
-	
+
+	// Create relay address generator
+	relayAddressGenerator := &turn.RelayAddressGeneratorStatic{
+		RelayAddress: relayAddress,
+		Address:      "0.0.0.0",
+	}
+
 	// Listen on UDP
 	udpListener, err := net.ListenPacket("udp4", addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on UDP %s: %w", addr, err)
 	}
-	
+
 	// Listen on TCP
 	tcpListener, err := net.Listen("tcp4", addr)
 	if err != nil {
 		udpListener.Close()
 		return fmt.Errorf("failed to listen on TCP %s: %w", addr, err)
 	}
-	
+
 	// Create TURN server configuration
 	serverConfig := turn.ServerConfig{
 		Realm:       t.config.Realm,
@@ -84,7 +98,7 @@ func (t *TURNServer) Start() error {
 			},
 		},
 	}
-	
+
 	// Create TURN server
 	server, err := turn.NewServer(serverConfig)
 	if err != nil {
@@ -92,14 +106,14 @@ func (t *TURNServer) Start() error {
 		tcpListener.Close()
 		return fmt.Errorf("failed to create TURN server: %w", err)
 	}
-	
+
 	t.server = server
-	
+
 	t.logger.WithField("address", addr).Info("TURN server started")
-	
+
 	// Start session cleanup routine
 	go t.sessionCleanup()
-	
+
 	return nil
 }
 
@@ -220,4 +234,59 @@ func (t *TURNServer) GetStats() map[string]interface{} {
 		"realm":           t.config.Realm,
 		"active_sessions": sessionCount,
 	}
+}
+
+func discoverPublicIP(logger *logrus.Logger) (net.IP, error) {
+	// We use a public STUN server to discover our public IP address.
+	// Google's STUN server is a good choice.
+	c, err := net.Dial("udp4", "stun.l.google.com:19302")
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial STUN server: %w", err)
+	}
+	defer c.Close()
+
+	// Create a STUN client
+	client, err := stun.NewClient(c)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create STUN client: %w", err)
+	}
+	defer client.Close()
+
+	// Build a binding request
+	message, err := stun.Build(stun.BindingRequest, stun.TransactionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build STUN request: %w", err)
+	}
+
+	var xorMappedAddr stun.XORMappedAddress
+	var discoveryErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Callback function to handle the STUN response
+	callback := func(res stun.Event) {
+		defer wg.Done()
+		if res.Error != nil {
+			discoveryErr = res.Error
+			return
+		}
+		// Get the XOR-MAPPED-ADDRESS attribute from the response
+		if err := xorMappedAddr.GetFrom(res.Message); err != nil {
+			discoveryErr = fmt.Errorf("failed to get XOR-MAPPED-ADDRESS: %w", err)
+			return
+		}
+	}
+
+	// Send the request and wait for the response
+	if err := client.Do(message, callback); err != nil {
+		return nil, fmt.Errorf("failed to send STUN request: %w", err)
+	}
+
+	wg.Wait()
+
+	if discoveryErr != nil {
+		return nil, discoveryErr
+	}
+
+	return xorMappedAddr.IP, nil
 }

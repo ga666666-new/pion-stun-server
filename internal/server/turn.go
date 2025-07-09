@@ -10,7 +10,7 @@ import (
 
 	pionlogger "github.com/pion/logging"
 	"github.com/pion/stun"
-	"github.com/pion/turn/v2"
+	"github.com/pion/turn/v4"
 	"github.com/sirupsen/logrus"
 
 	"github.com/ga666666-new/pion-stun-server/internal/auth"
@@ -110,34 +110,32 @@ func (t *TURNServer) Start() error {
 		}
 	}
 
-	// Create relay address generator
+	// 创建 relay address generator
 	relayAddressGenerator := &turn.RelayAddressGeneratorStatic{
 		RelayAddress: relayAddress,
 		Address:      "0.0.0.0",
 	}
 
-	// Create logger factory for pion
 	loggerFactory := &turnLoggerFactory{logger: t.logger}
 
-	// Listen on UDP
+	// UDP 监听
 	udpListener, err := net.ListenPacket("udp4", addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen on UDP %s: %w", addr, err)
 	}
 
-	// Listen on TCP
+	// TCP 监听
 	tcpListener, err := net.Listen("tcp4", addr)
 	if err != nil {
 		udpListener.Close()
 		return fmt.Errorf("failed to listen on TCP %s: %w", addr, err)
 	}
 
-	// Create TURN server configuration
+	// pion/turn v4 新版 ServerConfig
 	serverConfig := turn.ServerConfig{
 		Realm:         t.config.Realm,
 		AuthHandler:   t.handleAuth,
 		LoggerFactory: loggerFactory,
-		InboundMTU:    1500, // This is a workaround to enable automatic permissions.
 		PacketConnConfigs: []turn.PacketConnConfig{
 			{
 				PacketConn:            udpListener,
@@ -161,12 +159,8 @@ func (t *TURNServer) Start() error {
 	}
 
 	t.server = server
-
 	t.logger.WithField("address", addr).Info("TURN server started")
-
-	// Start session cleanup routine
 	go t.sessionCleanup()
-
 	return nil
 }
 

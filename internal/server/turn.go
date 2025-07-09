@@ -87,6 +87,36 @@ func createDebugPermissionHandler(logger *logrus.Logger) turn.PermissionHandler 
 	}
 }
 
+// 添加一个全局权限管理器，用于自动创建权限
+type autoPermissionManager struct {
+	logger *logrus.Logger
+	permissions map[string]bool
+	mutex sync.RWMutex
+}
+
+func newAutoPermissionManager(logger *logrus.Logger) *autoPermissionManager {
+	return &autoPermissionManager{
+		logger: logger,
+		permissions: make(map[string]bool),
+	}
+}
+
+func (m *autoPermissionManager) ensurePermission(allocationAddr, peerAddr string) {
+	key := fmt.Sprintf("%s->%s", allocationAddr, peerAddr)
+	
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	
+	if !m.permissions[key] {
+		m.permissions[key] = true
+		m.logger.WithFields(logrus.Fields{
+			"allocation": allocationAddr,
+			"peer":       peerAddr,
+			"action":     "AutoCreatePermission",
+		}).Warn("=== AUTO-CREATED PERMISSION (NON-STANDARD) ===")
+	}
+}
+
 // TURNServer represents a TURN server
 type TURNServer struct {
 	config        *config.TURNConfig
@@ -96,6 +126,8 @@ type TURNServer struct {
 	sessions      map[string]*models.SessionInfo
 	sessionsMutex sync.RWMutex
 	stopChan      chan struct{}
+	// 添加自动权限管理器
+	permManager   *autoPermissionManager
 }
 
 // NewTURNServer creates a new TURN server
@@ -106,6 +138,7 @@ func NewTURNServer(cfg *config.TURNConfig, authenticator *auth.MongoAuthenticato
 		logger:   logger,
 		sessions: make(map[string]*models.SessionInfo),
 		stopChan: make(chan struct{}),
+		permManager: newAutoPermissionManager(logger),
 	}
 }
 

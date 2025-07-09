@@ -140,12 +140,16 @@ func (t *TURNServer) Start() error {
 			{
 				PacketConn:            udpListener,
 				RelayAddressGenerator: relayAddressGenerator,
+				// 添加权限处理器，自动为所有请求创建权限
+				PermissionHandler: turn.DefaultPermissionHandler,
 			},
 		},
 		ListenerConfigs: []turn.ListenerConfig{
 			{
 				Listener:              tcpListener,
 				RelayAddressGenerator: relayAddressGenerator,
+				// 添加权限处理器，自动为所有请求创建权限
+				PermissionHandler: turn.DefaultPermissionHandler,
 			},
 		},
 	}

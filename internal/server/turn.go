@@ -65,6 +65,26 @@ func (f *turnLoggerFactory) NewLogger(scope string) pionlogger.LeveledLogger {
 	}
 }
 
+// 添加自定义权限处理器，用于调试
+func createDebugPermissionHandler(logger *logrus.Logger) turn.PermissionHandler {
+	return func(clientAddr net.Addr, peerIP net.IP) bool {
+		logger.WithFields(logrus.Fields{
+			"client_addr": clientAddr.String(),
+			"peer_ip":     peerIP.String(),
+			"action":      "PermissionCheck",
+		}).Info("Checking permission for peer")
+		
+		// 允许所有权限请求
+		logger.WithFields(logrus.Fields{
+			"client_addr": clientAddr.String(),
+			"peer_ip":     peerIP.String(),
+			"result":      "allowed",
+		}).Info("Permission granted")
+		
+		return true
+	}
+}
+
 // TURNServer represents a TURN server
 type TURNServer struct {
 	config        *config.TURNConfig
@@ -140,19 +160,27 @@ func (t *TURNServer) Start() error {
 			{
 				PacketConn:            udpListener,
 				RelayAddressGenerator: relayAddressGenerator,
-				// 添加权限处理器，自动为所有请求创建权限
-				PermissionHandler: turn.DefaultPermissionHandler,
+				// 使用自定义权限处理器，增加调试日志
+				PermissionHandler: createDebugPermissionHandler(t.logger),
 			},
 		},
 		ListenerConfigs: []turn.ListenerConfig{
 			{
 				Listener:              tcpListener,
 				RelayAddressGenerator: relayAddressGenerator,
-				// 添加权限处理器，自动为所有请求创建权限
-				PermissionHandler: turn.DefaultPermissionHandler,
+				// 使用自定义权限处理器，增加调试日志
+				PermissionHandler: createDebugPermissionHandler(t.logger),
 			},
 		},
 	}
+
+	t.logger.WithFields(logrus.Fields{
+		"realm":           t.config.Realm,
+		"relay_address":   relayAddress.String(),
+		"udp_listener":    addr,
+		"tcp_listener":    addr,
+		"permission_mode": "debug_handler",
+	}).Info("TURN server configuration")
 
 	// Create TURN server
 	server, err := turn.NewServer(serverConfig)
@@ -190,6 +218,8 @@ func (t *TURNServer) handleAuth(username, realm string, srcAddr net.Addr) (key [
 		"client":   srcAddr.String(),
 	})
 	
+	logger.Info("TURN authentication request received")
+	
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	
@@ -212,7 +242,11 @@ func (t *TURNServer) handleAuth(username, realm string, srcAddr net.Addr) (key [
 		return nil, false
 	}
 	
-	logger.Debug("Authentication successful")
+	logger.WithFields(logrus.Fields{
+		"username":     user.Username,
+		"key_length":   len(decodedKey),
+		"quota_status": "ok",
+	}).Info("TURN authentication successful")
 	
 	// Create session info
 	sessionID := fmt.Sprintf("%s-%d", srcAddr.String(), time.Now().Unix())
@@ -227,6 +261,8 @@ func (t *TURNServer) handleAuth(username, realm string, srcAddr net.Addr) (key [
 	t.sessionsMutex.Lock()
 	t.sessions[sessionID] = session
 	t.sessionsMutex.Unlock()
+	
+	logger.WithField("session_id", sessionID).Debug("TURN session created")
 	
 	return decodedKey, true
 }

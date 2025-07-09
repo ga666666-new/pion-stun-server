@@ -72,14 +72,16 @@ func createDebugPermissionHandler(logger *logrus.Logger) turn.PermissionHandler 
 			"client_addr": clientAddr.String(),
 			"peer_ip":     peerIP.String(),
 			"action":      "PermissionCheck",
-		}).Info("Checking permission for peer")
+			"timestamp":   time.Now().Format("2006-01-02T15:04:05Z"),
+		}).Info("=== PERMISSION HANDLER CALLED ===")
 		
 		// 允许所有权限请求
 		logger.WithFields(logrus.Fields{
 			"client_addr": clientAddr.String(),
 			"peer_ip":     peerIP.String(),
-			"result":      "allowed",
-		}).Info("Permission granted")
+			"result":      "ALLOWED",
+			"reason":      "debug_handler_allows_all",
+		}).Info("=== PERMISSION GRANTED ===")
 		
 		return true
 	}
@@ -192,6 +194,15 @@ func (t *TURNServer) Start() error {
 
 	t.server = server
 	t.logger.WithField("address", addr).Info("TURN server started")
+	
+	// 添加启动后的调试信息
+	t.logger.Info("=== TURN Server Debug Info ===")
+	t.logger.Info("1. Server is listening for TURN requests")
+	t.logger.Info("2. Custom PermissionHandler is configured to allow all peers")
+	t.logger.Info("3. Expected flow: AllocateRequest -> CreatePermission -> SendIndication")
+	t.logger.Info("4. If you see 'No Permission' errors, client is skipping CreatePermission step")
+	t.logger.Info("=== End Debug Info ===")
+	
 	go t.sessionCleanup()
 	return nil
 }

@@ -65,27 +65,159 @@ func (f *turnLoggerFactory) NewLogger(scope string) pionlogger.LeveledLogger {
 	}
 }
 
-// 添加自定义权限处理器，用于调试
-func createDebugPermissionHandler(logger *logrus.Logger) turn.PermissionHandler {
-	return func(clientAddr net.Addr, peerIP net.IP) bool {
-		logger.WithFields(logrus.Fields{
-			"client_addr": clientAddr.String(),
-			"peer_ip":     peerIP.String(),
-			"action":      "PermissionCheck",
-			"timestamp":   time.Now().Format("2006-01-02T15:04:05Z"),
-		}).Info("=== PERMISSION HANDLER CALLED ===")
-		
-		// 允许所有权限请求
-		logger.WithFields(logrus.Fields{
-			"client_addr": clientAddr.String(),
-			"peer_ip":     peerIP.String(),
-			"result":      "ALLOWED",
-			"reason":      "debug_handler_allows_all",
-		}).Info("=== PERMISSION GRANTED ===")
-		
-		return true
+// 客户端会话追踪器
+type clientSessionTracker struct {
+	logger        *logrus.Logger
+	sessions      map[string]*clientSession
+	mutex         sync.RWMutex
+}
+
+type clientSession struct {
+	ClientAddr    string
+	Username      string
+	StartTime     time.Time
+	LastActivity  time.Time
+	Steps         []string
+	Allocations   map[string]*allocationInfo
+	Permissions   map[string]*permissionInfo
+	Channels      map[string]*channelInfo
+}
+
+type allocationInfo struct {
+	RelayAddr     string
+	CreatedAt     time.Time
+	LastActivity  time.Time
+}
+
+type permissionInfo struct {
+	PeerAddr      string
+	CreatedAt     time.Time
+	LastActivity  time.Time
+}
+
+type channelInfo struct {
+	PeerAddr      string
+	ChannelNumber uint16
+	CreatedAt     time.Time
+	LastActivity  time.Time
+}
+
+func newClientSessionTracker(logger *logrus.Logger) *clientSessionTracker {
+	return &clientSessionTracker{
+		logger:   logger,
+		sessions: make(map[string]*clientSession),
 	}
 }
+
+func (t *clientSessionTracker) trackStep(clientAddr, username, step string) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	
+	session, exists := t.sessions[clientAddr]
+	if !exists {
+		session = &clientSession{
+			ClientAddr:   clientAddr,
+			Username:     username,
+			StartTime:    time.Now(),
+			LastActivity: time.Now(),
+			Steps:        []string{},
+			Allocations:  make(map[string]*allocationInfo),
+			Permissions:  make(map[string]*permissionInfo),
+			Channels:     make(map[string]*channelInfo),
+		}
+		t.sessions[clientAddr] = session
+		t.logger.WithFields(logrus.Fields{
+			"client_addr": clientAddr,
+			"username":    username,
+			"action":      "NEW_SESSION",
+		}).Info("=== 新客户端会话开始 ===")
+	}
+	
+	session.LastActivity = time.Now()
+	session.Steps = append(session.Steps, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05.000"), step))
+	
+	t.logger.WithFields(logrus.Fields{
+		"client_addr":    clientAddr,
+		"username":       username,
+		"step":           step,
+		"total_steps":    len(session.Steps),
+		"session_duration": time.Since(session.StartTime).String(),
+	}).Info("=== 客户端步骤追踪 ===")
+}
+
+func (t *clientSessionTracker) trackAllocation(clientAddr, relayAddr string) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	
+	if session, exists := t.sessions[clientAddr]; exists {
+		session.Allocations[relayAddr] = &allocationInfo{
+			RelayAddr:    relayAddr,
+			CreatedAt:    time.Now(),
+			LastActivity: time.Now(),
+		}
+		t.logger.WithFields(logrus.Fields{
+			"client_addr": clientAddr,
+			"relay_addr":  relayAddr,
+			"action":      "ALLOCATION_CREATED",
+		}).Info("=== 分配创建 ===")
+	}
+}
+
+func (t *clientSessionTracker) trackPermission(clientAddr, peerAddr string) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	
+	if session, exists := t.sessions[clientAddr]; exists {
+		session.Permissions[peerAddr] = &permissionInfo{
+			PeerAddr:     peerAddr,
+			CreatedAt:    time.Now(),
+			LastActivity: time.Now(),
+		}
+		t.logger.WithFields(logrus.Fields{
+			"client_addr": clientAddr,
+			"peer_addr":   peerAddr,
+			"action":      "PERMISSION_CREATED",
+		}).Info("=== 权限创建 ===")
+	}
+}
+
+func (t *clientSessionTracker) getSessionInfo(clientAddr string) *clientSession {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	
+	if session, exists := t.sessions[clientAddr]; exists {
+		return session
+	}
+	return nil
+}
+
+func (t *clientSessionTracker) logSessionSummary(clientAddr string) {
+	session := t.getSessionInfo(clientAddr)
+	if session == nil {
+		return
+	}
+	
+	t.logger.WithFields(logrus.Fields{
+		"client_addr":      clientAddr,
+		"username":         session.Username,
+		"session_duration": time.Since(session.StartTime).String(),
+		"total_steps":      len(session.Steps),
+		"allocations":      len(session.Allocations),
+		"permissions":      len(session.Permissions),
+		"channels":         len(session.Channels),
+	}).Info("=== 会话摘要 ===")
+	
+	// 打印详细步骤
+	for i, step := range session.Steps {
+		t.logger.WithFields(logrus.Fields{
+			"client_addr": clientAddr,
+			"step_number": i + 1,
+			"step_detail": step,
+		}).Info("步骤详情")
+	}
+}
+
+
 
 // 添加一个全局权限管理器，用于自动创建权限
 type autoPermissionManager struct {
@@ -117,6 +249,19 @@ func (m *autoPermissionManager) ensurePermission(allocationAddr, peerAddr string
 	}
 }
 
+// TURN请求类型追踪
+type turnRequestTracker struct {
+	logger  *logrus.Logger
+	tracker *clientSessionTracker
+}
+
+func newTurnRequestTracker(logger *logrus.Logger, tracker *clientSessionTracker) *turnRequestTracker {
+	return &turnRequestTracker{
+		logger:  logger,
+		tracker: tracker,
+	}
+}
+
 // TURNServer represents a TURN server
 type TURNServer struct {
 	config        *config.TURNConfig
@@ -128,169 +273,149 @@ type TURNServer struct {
 	stopChan      chan struct{}
 	// 添加自动权限管理器
 	permManager   *autoPermissionManager
+	// 添加客户端会话追踪器
+	sessionTracker *clientSessionTracker
 }
 
 // NewTURNServer creates a new TURN server
 func NewTURNServer(cfg *config.TURNConfig, authenticator *auth.MongoAuthenticator, logger *logrus.Logger) *TURNServer {
 	return &TURNServer{
-		config:   cfg,
-		auth:     authenticator,
-		logger:   logger,
-		sessions: make(map[string]*models.SessionInfo),
-		stopChan: make(chan struct{}),
-		permManager: newAutoPermissionManager(logger),
+		config:         cfg,
+		auth:           authenticator,
+		logger:         logger,
+		sessions:       make(map[string]*models.SessionInfo),
+		stopChan:       make(chan struct{}),
+		permManager:    newAutoPermissionManager(logger),
+		sessionTracker: newClientSessionTracker(logger),
 	}
 }
 
-// Start starts the TURN server
-func (t *TURNServer) Start() error {
-	addr := fmt.Sprintf("%s:%d", t.config.Address, t.config.Port)
-
-	var relayAddress net.IP
-	if t.config.PublicIP != "" {
-		relayAddress = net.ParseIP(t.config.PublicIP)
-		if relayAddress == nil {
-			return fmt.Errorf("invalid public_ip address: %s", t.config.PublicIP)
-		}
-		t.logger.WithField("ip", relayAddress.String()).Info("Using configured public IP")
-	} else {
-		t.logger.Info("Public IP not configured, attempting to discover using STUN")
-		discoveredIP, err := discoverPublicIP(t.logger)
-		if err != nil {
-			t.logger.WithError(err).Warn("Failed to discover public IP, falling back to 127.0.0.1. TURN will likely not work externally.")
-			relayAddress = net.ParseIP("127.0.0.1")
-		} else {
-			relayAddress = discoveredIP
-			t.logger.WithField("ip", relayAddress.String()).Info("Discovered public IP")
-		}
-	}
-
-	// 创建 relay address generator
-	relayAddressGenerator := &turn.RelayAddressGeneratorStatic{
-		RelayAddress: relayAddress,
-		Address:      "0.0.0.0",
-	}
-
+// 创建自定义的TURN服务器配置，增加请求拦截
+func (t *TURNServer) createEnhancedServerConfig(relayAddressGenerator turn.RelayAddressGenerator, udpListener net.PacketConn, tcpListener net.Listener) turn.ServerConfig {
 	loggerFactory := &turnLoggerFactory{logger: t.logger}
-
-	// UDP 监听
-	udpListener, err := net.ListenPacket("udp4", addr)
-	if err != nil {
-		return fmt.Errorf("failed to listen on UDP %s: %w", addr, err)
+	
+	// 创建自定义的权限处理器，增加更多调试信息
+	permissionHandler := func(clientAddr net.Addr, peerIP net.IP) bool {
+		clientAddrStr := clientAddr.String()
+		peerIPStr := peerIP.String()
+		
+		t.logger.WithFields(logrus.Fields{
+			"client_addr": clientAddrStr,
+			"peer_ip":     peerIPStr,
+			"action":      "PERMISSION_CHECK",
+			"timestamp":   time.Now().Format("15:04:05.000"),
+		}).Info("=== 权限检查被调用 ===")
+		
+		// 追踪权限检查步骤
+		t.sessionTracker.trackStep(clientAddrStr, "", "PERMISSION_CHECK: "+peerIPStr)
+		
+		// 检查会话信息
+		session := t.sessionTracker.getSessionInfo(clientAddrStr)
+		if session != nil {
+			t.logger.WithFields(logrus.Fields{
+				"client_addr":    clientAddrStr,
+				"username":       session.Username,
+				"existing_perms": len(session.Permissions),
+				"allocations":    len(session.Allocations),
+				"session_age":    time.Since(session.StartTime).String(),
+			}).Info("=== 现有会话信息 ===")
+			
+			// 检查是否已有此peer的权限
+			if _, exists := session.Permissions[peerIPStr]; exists {
+				t.logger.WithFields(logrus.Fields{
+					"client_addr": clientAddrStr,
+					"peer_ip":     peerIPStr,
+					"result":      "ALLOWED",
+					"reason":      "existing_permission",
+				}).Info("=== 权限已存在，允许 ===")
+				return true
+			}
+		}
+		
+		// 自动授予权限并记录
+		t.sessionTracker.trackPermission(clientAddrStr, peerIPStr)
+		
+		t.logger.WithFields(logrus.Fields{
+			"client_addr": clientAddrStr,
+			"peer_ip":     peerIPStr,
+			"result":      "ALLOWED",
+			"reason":      "auto_grant_debug_mode",
+		}).Info("=== 权限自动授予（调试模式）===")
+		
+		return true
 	}
-
-	// TCP 监听
-	tcpListener, err := net.Listen("tcp4", addr)
-	if err != nil {
-		udpListener.Close()
-		return fmt.Errorf("failed to listen on TCP %s: %w", addr, err)
-	}
-
-	// pion/turn v4 新版 ServerConfig
-	serverConfig := turn.ServerConfig{
+	
+	return turn.ServerConfig{
 		Realm:         t.config.Realm,
-		AuthHandler:   t.handleAuth,
+		AuthHandler:   t.enhancedAuthHandler,
 		LoggerFactory: loggerFactory,
 		PacketConnConfigs: []turn.PacketConnConfig{
 			{
 				PacketConn:            udpListener,
 				RelayAddressGenerator: relayAddressGenerator,
-				// 使用自定义权限处理器，增加调试日志
-				PermissionHandler: createDebugPermissionHandler(t.logger),
+				PermissionHandler:     permissionHandler,
 			},
 		},
 		ListenerConfigs: []turn.ListenerConfig{
 			{
 				Listener:              tcpListener,
 				RelayAddressGenerator: relayAddressGenerator,
-				// 使用自定义权限处理器，增加调试日志
-				PermissionHandler: createDebugPermissionHandler(t.logger),
+				PermissionHandler:     permissionHandler,
 			},
 		},
 	}
-
-	t.logger.WithFields(logrus.Fields{
-		"realm":           t.config.Realm,
-		"relay_address":   relayAddress.String(),
-		"udp_listener":    addr,
-		"tcp_listener":    addr,
-		"permission_mode": "debug_handler",
-	}).Info("TURN server configuration")
-
-	// Create TURN server
-	server, err := turn.NewServer(serverConfig)
-	if err != nil {
-		udpListener.Close()
-		tcpListener.Close()
-		return fmt.Errorf("failed to create TURN server: %w", err)
-	}
-
-	t.server = server
-	t.logger.WithField("address", addr).Info("TURN server started")
-	
-	// 添加启动后的调试信息
-	t.logger.Info("=== TURN Server Debug Info ===")
-	t.logger.Info("1. Server is listening for TURN requests")
-	t.logger.Info("2. Custom PermissionHandler is configured to allow all peers")
-	t.logger.Info("3. Expected flow: AllocateRequest -> CreatePermission -> SendIndication")
-	t.logger.Info("4. If you see 'No Permission' errors, client is skipping CreatePermission step")
-	t.logger.Info("=== End Debug Info ===")
-	
-	go t.sessionCleanup()
-	return nil
 }
 
-// Stop stops the TURN server
-func (t *TURNServer) Stop() error {
-	close(t.stopChan)
+// 增强的认证处理器，包含更多调试信息
+func (t *TURNServer) enhancedAuthHandler(username, realm string, srcAddr net.Addr) (key []byte, ok bool) {
+	clientAddrStr := srcAddr.String()
 	
-	if t.server != nil {
-		if err := t.server.Close(); err != nil {
-			return fmt.Errorf("failed to close TURN server: %w", err)
-		}
-	}
-	
-	t.logger.Info("TURN server stopped")
-	return nil
-}
-
-// handleAuth handles TURN authentication
-func (t *TURNServer) handleAuth(username, realm string, srcAddr net.Addr) (key []byte, ok bool) {
 	logger := t.logger.WithFields(logrus.Fields{
-		"username": username,
-		"realm":    realm,
-		"client":   srcAddr.String(),
+		"username":   username,
+		"realm":      realm,
+		"client":     clientAddrStr,
+		"timestamp":  time.Now().Format("15:04:05.000"),
 	})
 	
-	logger.Info("TURN authentication request received")
+	logger.Info("=== TURN 认证请求接收 ===")
+	t.sessionTracker.trackStep(clientAddrStr, username, "AUTHENTICATION_REQUEST")
 	
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	
 	storedKey, user, err := t.auth.GetTURNAuthKey(ctx, username)
 	if err != nil {
-		logger.WithError(err).Debug("Authentication failed")
+		logger.WithError(err).Error("=== 认证失败 ===")
+		t.sessionTracker.trackStep(clientAddrStr, username, "AUTHENTICATION_FAILED: "+err.Error())
 		return nil, false
 	}
 	
 	// The stored key is hex-encoded, decode it for pion/turn
 	decodedKey, err := hex.DecodeString(storedKey)
 	if err != nil {
-		logger.WithError(err).Error("Failed to decode stored TURN key")
+		logger.WithError(err).Error("=== 密钥解码失败 ===")
+		t.sessionTracker.trackStep(clientAddrStr, username, "KEY_DECODE_FAILED: "+err.Error())
 		return nil, false
 	}
 	
 	// Check user quota
 	if user.Quota != nil && user.Quota.CurrentSessions >= user.Quota.MaxSessions {
-		logger.Debug("User quota exceeded")
+		logger.WithFields(logrus.Fields{
+			"current_sessions": user.Quota.CurrentSessions,
+			"max_sessions":     user.Quota.MaxSessions,
+		}).Warn("=== 用户配额超限 ===")
+		t.sessionTracker.trackStep(clientAddrStr, username, "QUOTA_EXCEEDED")
 		return nil, false
 	}
 	
 	logger.WithFields(logrus.Fields{
 		"username":     user.Username,
 		"key_length":   len(decodedKey),
-		"quota_status": "ok",
-	}).Info("TURN authentication successful")
+		"quota_current": func() int { if user.Quota != nil { return user.Quota.CurrentSessions } else { return 0 } }(),
+		"quota_max":    func() int { if user.Quota != nil { return user.Quota.MaxSessions } else { return -1 } }(),
+	}).Info("=== TURN 认证成功 ===")
+	
+	t.sessionTracker.trackStep(clientAddrStr, username, "AUTHENTICATION_SUCCESS")
 	
 	// Create session info
 	sessionID := fmt.Sprintf("%s-%d", srcAddr.String(), time.Now().Unix())
@@ -306,7 +431,12 @@ func (t *TURNServer) handleAuth(username, realm string, srcAddr net.Addr) (key [
 	t.sessions[sessionID] = session
 	t.sessionsMutex.Unlock()
 	
-	logger.WithField("session_id", sessionID).Debug("TURN session created")
+	logger.WithFields(logrus.Fields{
+		"session_id": sessionID,
+		"username":   user.Username,
+		"client":     clientAddrStr,
+	}).Info("=== TURN 会话创建 ===")
+	t.sessionTracker.trackStep(clientAddrStr, username, "SESSION_CREATED: "+sessionID)
 	
 	return decodedKey, true
 }
@@ -335,7 +465,65 @@ func (t *TURNServer) cleanupInactiveSessions() {
 	for sessionID, session := range t.sessions {
 		if now.Sub(session.LastActive) > 5*time.Minute {
 			delete(t.sessions, sessionID)
-			t.logger.WithField("session_id", sessionID).Debug("Cleaned up inactive session")
+			t.logger.WithField("session_id", sessionID).Info("=== 清理非活跃会话 ===")
+			
+			// 打印会话摘要
+			t.sessionTracker.logSessionSummary(session.ClientAddr)
+		}
+	}
+}
+
+// 定期打印会话摘要
+func (t *TURNServer) periodicSessionSummary() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-t.stopChan:
+			return
+		case <-ticker.C:
+			t.printActiveSessions()
+		}
+	}
+}
+
+// 打印活跃会话信息
+func (t *TURNServer) printActiveSessions() {
+	t.sessionTracker.mutex.RLock()
+	defer t.sessionTracker.mutex.RUnlock()
+	
+	if len(t.sessionTracker.sessions) == 0 {
+		t.logger.Info("=== 当前无活跃TURN会话 ===")
+		return
+	}
+	
+	t.logger.WithField("active_sessions", len(t.sessionTracker.sessions)).Info("=== 活跃会话摘要 ===")
+	
+	for clientAddr, session := range t.sessionTracker.sessions {
+		t.logger.WithFields(logrus.Fields{
+			"client_addr":      clientAddr,
+			"username":         session.Username,
+			"session_duration": time.Since(session.StartTime).String(),
+			"total_steps":      len(session.Steps),
+			"allocations":      len(session.Allocations),
+			"permissions":      len(session.Permissions),
+			"channels":         len(session.Channels),
+			"last_activity":    time.Since(session.LastActivity).String(),
+		}).Info("会话状态")
+		
+		// 打印最近的步骤
+		if len(session.Steps) > 0 {
+			recentSteps := session.Steps
+			if len(recentSteps) > 3 {
+				recentSteps = recentSteps[len(recentSteps)-3:]
+			}
+			for _, step := range recentSteps {
+				t.logger.WithFields(logrus.Fields{
+					"client_addr": clientAddr,
+					"recent_step": step,
+				}).Info("最近步骤")
+			}
 		}
 	}
 }
@@ -420,4 +608,99 @@ func discoverPublicIP(logger *logrus.Logger) (net.IP, error) {
 	}
 
 	return xorMappedAddr.IP, nil
+}
+
+// Start starts the TURN server
+func (t *TURNServer) Start() error {
+	addr := fmt.Sprintf("%s:%d", t.config.Address, t.config.Port)
+
+	var relayAddress net.IP
+	if t.config.PublicIP != "" {
+		relayAddress = net.ParseIP(t.config.PublicIP)
+		if relayAddress == nil {
+			return fmt.Errorf("invalid public_ip address: %s", t.config.PublicIP)
+		}
+		t.logger.WithField("ip", relayAddress.String()).Info("Using configured public IP")
+	} else {
+		t.logger.Info("Public IP not configured, attempting to discover using STUN")
+		discoveredIP, err := discoverPublicIP(t.logger)
+		if err != nil {
+			t.logger.WithError(err).Warn("Failed to discover public IP, falling back to 127.0.0.1. TURN will likely not work externally.")
+			relayAddress = net.ParseIP("127.0.0.1")
+		} else {
+			relayAddress = discoveredIP
+			t.logger.WithField("ip", relayAddress.String()).Info("Discovered public IP")
+		}
+	}
+
+	// 创建 relay address generator
+	relayAddressGenerator := &turn.RelayAddressGeneratorStatic{
+		RelayAddress: relayAddress,
+		Address:      "0.0.0.0",
+	}
+
+	// UDP 监听
+	udpListener, err := net.ListenPacket("udp4", addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen on UDP %s: %w", addr, err)
+	}
+
+	// TCP 监听
+	tcpListener, err := net.Listen("tcp4", addr)
+	if err != nil {
+		udpListener.Close()
+		return fmt.Errorf("failed to listen on TCP %s: %w", addr, err)
+	}
+
+	// 使用增强的服务器配置
+	serverConfig := t.createEnhancedServerConfig(relayAddressGenerator, udpListener, tcpListener)
+
+	t.logger.WithFields(logrus.Fields{
+		"realm":           t.config.Realm,
+		"relay_address":   relayAddress.String(),
+		"udp_listener":    addr,
+		"tcp_listener":    addr,
+		"permission_mode": "enhanced_debug_tracking",
+	}).Info("TURN server configuration")
+
+	// Create TURN server
+	server, err := turn.NewServer(serverConfig)
+	if err != nil {
+		udpListener.Close()
+		tcpListener.Close()
+		return fmt.Errorf("failed to create TURN server: %w", err)
+	}
+
+	t.server = server
+	t.logger.WithField("address", addr).Info("TURN server started")
+	
+	// 添加启动后的调试信息
+	t.logger.Info("=== TURN Server Enhanced Debug Info ===")
+	t.logger.Info("1. Server is listening for TURN requests")
+	t.logger.Info("2. Enhanced PermissionHandler with detailed session tracking")
+	t.logger.Info("3. Expected TURN flow:")
+	t.logger.Info("   a) AllocateRequest -> Authentication -> Allocation created")
+	t.logger.Info("   b) CreatePermission -> Permission granted")
+	t.logger.Info("   c) SendIndication -> Data relay")
+	t.logger.Info("4. All client steps, permissions, and data flows will be tracked")
+	t.logger.Info("5. 'No Permission' errors indicate missing CreatePermission step")
+	t.logger.Info("=== End Enhanced Debug Info ===")
+	
+	go t.sessionCleanup()
+	go t.periodicSessionSummary()
+	return nil
+}
+
+// Stop stops the TURN server
+func (t *TURNServer) Stop() error {
+	close(t.stopChan)
+	
+	if t.server != nil {
+		if err := t.server.Close(); err != nil {
+			return fmt.Errorf("failed to close TURN server: %w", err)
+		}
+	}
+	
+	t.logger.Info("TURN server stopped")
+	return nil
 }

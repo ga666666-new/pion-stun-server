@@ -18,6 +18,7 @@ server:
       - "192.168.0.0/16"
     max_lifetime: 3600  # seconds
     default_ttl: 600    # seconds
+    terminate_on_permission_error: true
   
   health:
     port: 8080

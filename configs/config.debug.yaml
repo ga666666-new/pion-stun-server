@@ -1,0 +1,52 @@
+# Pion STUN/TURN Server Debug Configuration
+# 专门用于调试权限问题的配置文件
+
+server:
+  stun:
+    port: 3478
+    address: "0.0.0.0"
+  
+  turn:
+    port: 3479
+    address: "0.0.0.0"
+    realm: "pion-stun-turn"
+    public_ip: "223.254.128.13"  # 使用你的公网IP
+    relay_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    max_lifetime: 3600
+    default_ttl: 600
+    # 调试选项：遇到权限错误时立即终止程序并输出详细调试信息
+    terminate_on_permission_error: true
+  
+  health:
+    port: 8080
+    address: "0.0.0.0"
+    path: "/health"
+
+mongodb:
+  uri: "mongodb://localhost:27017"
+  database: "stun_turn"
+  collection: "users"
+  
+  fields:
+    username: "username"
+    password: "password"
+    enabled: "enabled"
+    salt: "salt"
+  
+  options:
+    max_pool_size: 10
+    min_pool_size: 1
+    connect_timeout: 10
+    server_selection_timeout: 5
+
+logging:
+  level: "trace"  # 最详细的日志级别
+  format: "json"
+  output: "stdout"
+
+security:
+  password_hash_cost: 12
+  secret_key: "your-secret-key-here" 

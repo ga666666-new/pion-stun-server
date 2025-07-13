@@ -1,11 +1,11 @@
 module github.com/ga666666-new/pion-stun-server
 
-go 1.21
+go 1.24
 
 require (
 	github.com/pion/logging v0.2.3
 	github.com/pion/stun v0.6.1
-	github.com/pion/turn/v2 v2.1.6
+	github.com/pion/turn/v4 v4.0.2
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.10.0
@@ -29,7 +29,6 @@ require (
 	github.com/pion/stun/v3 v3.0.0 // indirect
 	github.com/pion/transport/v2 v2.2.1 // indirect
 	github.com/pion/transport/v3 v3.0.7 // indirect
-	github.com/pion/turn/v4 v4.0.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/afero v1.9.5 // indirect
 	github.com/spf13/cast v1.5.1 // indirect

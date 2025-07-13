@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates tzdata
@@ -38,8 +38,13 @@ WORKDIR /app
 # Copy binary from builder stage
 COPY --from=builder /app/pion-stun-server .
 
-# Copy configuration files
-COPY --from=builder /app/configs ./configs
+# Copy configuration files to the correct location
+COPY --from=builder /app/configs/ ./config/
+
+# Create a default config.yaml from the example if it doesn't exist
+RUN if [ ! -f ./config/config.yaml ]; then \
+        cp ./config/config.example.yaml ./config/config.yaml; \
+    fi
 
 # Change ownership
 RUN chown -R appuser:appgroup /app
@@ -54,5 +59,5 @@ EXPOSE 3478/udp 3479/udp 3479/tcp 8080/tcp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
-# Run the application
-CMD ["./pion-stun-server"]
+# Run the application with config file specified
+CMD ["./pion-stun-server", "-config", "config/config.yaml"]

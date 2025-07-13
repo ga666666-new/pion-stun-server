@@ -16,6 +16,8 @@ server:
       - "192.168.0.0/16"
     max_lifetime: 3600  # seconds
     default_ttl: 600    # seconds
+    # 调试选项：遇到权限错误时终止程序并输出详细调试信息
+    terminate_on_permission_error: false
   
   health:
     port: 8080

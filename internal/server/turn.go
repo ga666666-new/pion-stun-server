@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,7 +22,9 @@ import (
 
 // turnLeveledLogger is a simple adapter to use logrus with pion's logger interface
 type turnLeveledLogger struct {
-	entry *logrus.Entry
+	entry                      *logrus.Entry
+	sessionTracker            *clientSessionTracker
+	terminateOnPermissionError bool
 }
 
 func (l *turnLeveledLogger) Trace(msg string) {
@@ -49,19 +53,118 @@ func (l *turnLeveledLogger) Warnf(format string, args ...interface{}) {
 }
 func (l *turnLeveledLogger) Error(msg string) {
 	l.entry.Error(msg)
+	l.checkPermissionError(msg)
 }
 func (l *turnLeveledLogger) Errorf(format string, args ...interface{}) {
 	l.entry.Errorf(format, args...)
+	msg := fmt.Sprintf(format, args...)
+	l.checkPermissionError(msg)
+}
+
+// checkPermissionError 检查是否为权限错误，如果是且配置了终止选项，则终止程序
+func (l *turnLeveledLogger) checkPermissionError(msg string) {
+	if !l.terminateOnPermissionError {
+		return
+	}
+	
+	// 检查是否包含权限错误信息
+	if strings.Contains(msg, "No Permission or Channel exists") {
+		l.entry.Error("=== 检测到权限错误，程序即将终止以便调试 ===")
+		
+		// 输出详细的调试信息
+		l.dumpDebugInfo(msg)
+		
+		// 终止程序
+		l.entry.Fatal("=== 程序因权限错误终止 ===")
+		os.Exit(1)
+	}
+}
+
+// dumpDebugInfo 输出详细的调试信息
+func (l *turnLeveledLogger) dumpDebugInfo(errorMsg string) {
+	l.entry.Error("=== 权限错误详细信息 ===")
+	l.entry.WithField("error_message", errorMsg).Error("错误消息")
+	
+	// 输出所有活跃会话的详细信息
+	if l.sessionTracker != nil {
+		l.sessionTracker.mutex.RLock()
+		defer l.sessionTracker.mutex.RUnlock()
+		
+		l.entry.WithField("total_sessions", len(l.sessionTracker.sessions)).Error("当前活跃会话数量")
+		
+		for clientAddr, session := range l.sessionTracker.sessions {
+			l.entry.WithFields(logrus.Fields{
+				"client_addr":      clientAddr,
+				"username":         session.Username,
+				"session_duration": time.Since(session.StartTime).String(),
+				"total_steps":      len(session.Steps),
+				"allocations":      len(session.Allocations),
+				"permissions":      len(session.Permissions),
+				"channels":         len(session.Channels),
+				"last_activity":    time.Since(session.LastActivity).String(),
+			}).Error("会话详细信息")
+			
+			// 输出所有步骤
+			l.entry.WithField("client_addr", clientAddr).Error("=== 会话步骤历史 ===")
+			for i, step := range session.Steps {
+				l.entry.WithFields(logrus.Fields{
+					"client_addr": clientAddr,
+					"step_number": i + 1,
+					"step_detail": step,
+				}).Error("步骤详情")
+			}
+			
+			// 输出所有分配
+			l.entry.WithField("client_addr", clientAddr).Error("=== 分配信息 ===")
+			for relayAddr, allocation := range session.Allocations {
+				l.entry.WithFields(logrus.Fields{
+					"client_addr": clientAddr,
+					"relay_addr":  relayAddr,
+					"created_at":  allocation.CreatedAt.Format("15:04:05.000"),
+					"age":         time.Since(allocation.CreatedAt).String(),
+				}).Error("分配详情")
+			}
+			
+			// 输出所有权限
+			l.entry.WithField("client_addr", clientAddr).Error("=== 权限信息 ===")
+			for peerAddr, permission := range session.Permissions {
+				l.entry.WithFields(logrus.Fields{
+					"client_addr": clientAddr,
+					"peer_addr":   peerAddr,
+					"created_at":  permission.CreatedAt.Format("15:04:05.000"),
+					"age":         time.Since(permission.CreatedAt).String(),
+				}).Error("权限详情")
+			}
+			
+			// 输出所有通道
+			l.entry.WithField("client_addr", clientAddr).Error("=== 通道信息 ===")
+			for peerAddr, channel := range session.Channels {
+				l.entry.WithFields(logrus.Fields{
+					"client_addr":     clientAddr,
+					"peer_addr":       peerAddr,
+					"channel_number":  channel.ChannelNumber,
+					"created_at":      channel.CreatedAt.Format("15:04:05.000"),
+					"age":             time.Since(channel.CreatedAt).String(),
+				}).Error("通道详情")
+			}
+		}
+	}
+	
+	l.entry.Error("=== 调试信息输出完成 ===")
 }
 
 // turnLoggerFactory creates new loggers for the pion/turn library
 type turnLoggerFactory struct {
-	logger *logrus.Logger
+	logger                     *logrus.Logger
+	sessionTracker            *clientSessionTracker
+	terminateOnPermissionError bool
 }
 
 func (f *turnLoggerFactory) NewLogger(scope string) pionlogger.LeveledLogger {
 	return &turnLeveledLogger{
-		entry: f.logger.WithField("scope", scope),
+		entry:                      f.logger.WithField("scope", scope),
+		sessionTracker:            f.sessionTracker,
+		terminateOnPermissionError: f.terminateOnPermissionError,
 	}
 }
 
@@ -292,7 +395,11 @@ func NewTURNServer(cfg *config.TURNConfig, authenticator *auth.MongoAuthenticato
 
 // 创建自定义的TURN服务器配置，增加请求拦截
 func (t *TURNServer) createEnhancedServerConfig(relayAddressGenerator turn.RelayAddressGenerator, udpListener net.PacketConn, tcpListener net.Listener) turn.ServerConfig {
-	loggerFactory := &turnLoggerFactory{logger: t.logger}
+	loggerFactory := &turnLoggerFactory{
+		logger:                     t.logger,
+		sessionTracker:            t.sessionTracker,
+		terminateOnPermissionError: t.config.TerminateOnPermissionError,
+	}
 	
 	// 创建自定义的权限处理器，增加更多调试信息
 	permissionHandler := func(clientAddr net.Addr, peerIP net.IP) bool {

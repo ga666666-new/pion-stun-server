@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P通信 - APP端 (App Simulator)</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        h1,
+        h2 {
+            color: #333;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+
+        video {
+            width: 100%;
+            border-radius: 8px;
+            background: #000;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.connecting {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .status.waiting {
+            background-color: #cce5ff;
+            color: #004085;
+            border: 1px solid #b8daff;
+        }
+
+        .log {
+            background: #e9ecef;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            height: 250px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+
+        #audioCanvas {
+            display: block;
+            margin: 10px 0;
+            border-radius: 8px;
+        }
+
+        .audio-visualizer {
+            background: #000;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>P2P通信 - APP端 (App Simulator)</h1>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label for="productKey">产品密钥 (Product Key):</label>
+                <input type="text" id="productKey" value="PLAF204">
+            </div>
+            <div class="form-group">
+                <label for="deviceSn">设备序列号 (Device SN):</label>
+                <input type="text" id="deviceSn" value="AF070135F064641AG">
+            </div>
+            <div class="form-group">
+                <label for="appId">APP ID (Member ID):</label>
+                <input type="text" id="appId" value="188815492">
+            </div>
+            <div class="form-group">
+                <label for="token">Token:</label>
+                <input type="text" id="token" value="de112787449e48ef8d53bc12c62f2773">
+            </div>
+        </div>
+
+        <div id="mqttStatus" class="status disconnected">MQTT状态: 未连接</div>
+        <div id="p2pStatus" class="status disconnected">P2P状态: 未连接</div>
+
+        <h2>远程视频 (来自设备)</h2>
+        <video id="remoteVideo" autoplay playsinline muted></video>
+        <!-- 本地音频流是静默发送的，不需要video元素 -->
+
+        <h2>音频可视化 (本地音频)</h2>
+        <div class="audio-visualizer">
+            <canvas id="audioCanvas" width="740" height="200"
+                style="border: 1px solid #ccc; background: #000;"></canvas>
+            <div style="margin-top: 10px; text-align: center;">
+                <button id="toggleVisualizationBtn" class="btn-primary" style="margin-right: 10px;">暂停可视化</button>
+                <button id="startAudioBtn" class="btn-primary"
+                    style="margin-right: 10px; background-color: #28a745;">启动音频</button>
+                <span id="visualizationStatus" style="color: #00ff00; font-weight: bold;">等待音频启动</span>
+            </div>
+            <div id="audioHint" style="margin-top: 10px; text-align: center; color: #ff9900; font-size: 14px;">
+                提示：P2P连接成功后会自动启动音频可视化，如果无显示请点击"启动音频"按钮
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="createSessionBtn" class="btn-primary">创建P2P会话</button>
+            <button id="endSessionBtn" class="btn-danger" disabled>结束会话</button>
+        </div>
+
+        <h2>日志</h2>
+        <div id="logArea" class="log"></div>
+    </div>
+
+    <script>
+        class P2PApp {
+            constructor() {
+                this.elements = {
+                    productKey: document.getElementById('productKey'),
+                    deviceSn: document.getElementById('deviceSn'),
+                    appId: document.getElementById('appId'),
+                    token: document.getElementById('token'),
+                    mqttStatus: document.getElementById('mqttStatus'),
+                    p2pStatus: document.getElementById('p2pStatus'),
+                    remoteVideo: document.getElementById('remoteVideo'),
+                    audioCanvas: document.getElementById('audioCanvas'),
+                    toggleVisualizationBtn: document.getElementById('toggleVisualizationBtn'),
+                    startAudioBtn: document.getElementById('startAudioBtn'),
+                    visualizationStatus: document.getElementById('visualizationStatus'),
+                    audioHint: document.getElementById('audioHint'),
+                    createSessionBtn: document.getElementById('createSessionBtn'),
+                    endSessionBtn: document.getElementById('endSessionBtn'),
+                    logArea: document.getElementById('logArea'),
+                };
+
+                this.pc = null;
+                this.localStream = null;
+                this.mqttClient = null;
+                this.remoteStream = new MediaStream();
+
+                this.sessionId = null;
+                this.rtcConfig = null; // 将从服务端API获取
+
+                // 音频可视化相关
+                this.audioContext = null;
+                this.analyser = null;
+                this.audioSource = null;
+                this.visualizationData = null;
+                this.isVisualizing = false;
+
+                this.mqttBroker = 'ws://192.168.10.120:8083/mqtt';
+
+                this.setupEventListeners();
+
+                // 初始化音频可视化状态
+                this.elements.visualizationStatus.textContent = '等待音频启动';
+                this.elements.visualizationStatus.style.color = '#ff9900';
+                this.elements.audioHint.textContent = '提示：P2P连接成功后会自动启动音频可视化，如果无显示请点击"启动音频"按钮';
+
+                this.log('APP端已初始化。');
+            }
+
+            setupEventListeners() {
+                this.elements.createSessionBtn.addEventListener('click', () => this.createSession());
+                this.elements.endSessionBtn.addEventListener('click', () => this.endSession());
+                this.elements.toggleVisualizationBtn.addEventListener('click', () => this.toggleVisualization());
+                this.elements.startAudioBtn.addEventListener('click', () => this.startAudioContext());
+            }
+
+            log(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                this.elements.logArea.textContent += `[${timestamp}] ${message}\n`;
+                this.elements.logArea.scrollTop = this.elements.logArea.scrollHeight;
+                console.log(`[App] ${message}`);
+            }
+
+            updateMqttStatus(status, className) {
+                this.elements.mqttStatus.textContent = `MQTT状态: ${status}`;
+                this.elements.mqttStatus.className = `status ${className}`;
+            }
+
+            updateP2pStatus(status, className) {
+                this.elements.p2pStatus.textContent = `P2P状态: ${status}`;
+                this.elements.p2pStatus.className = `status ${className}`;
+            }
+
+            // 初始化音频可视化
+            initAudioVisualization() {
+                try {
+                    this.log('初始化音频可视化...');
+
+                    // 检查浏览器支持
+                    if (!window.AudioContext && !window.webkitAudioContext) {
+                        this.log('浏览器不支持Web Audio API');
+                        return false;
+                    }
+
+                    // 如果已经有音频上下文且状态正常，直接返回
+                    if (this.audioContext && this.audioContext.state === 'running') {
+                        this.log('音频上下文已存在且运行正常');
+                        return true;
+                    }
+
+                    // 创建音频上下文（需要用户交互）
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+                    // 检查音频上下文状态
+                    if (this.audioContext.state === 'suspended') {
+                        this.log('音频上下文被暂停，需要用户交互才能启动');
+                        this.elements.visualizationStatus.textContent = '点击启动音频';
+                        this.elements.visualizationStatus.style.color = '#ff9900';
+                        // 不返回false，继续创建分析器
+                    }
+
+                    this.analyser = this.audioContext.createAnalyser();
+
+                    // 设置分析器参数
+                    this.analyser.fftSize = 256;
+                    this.analyser.smoothingTimeConstant = 0.8;
+
+                    // 创建数据数组
+                    this.visualizationData = new Uint8Array(this.analyser.frequencyBinCount);
+
+                    this.log(`音频可视化初始化完成 - 分析器FFT大小: ${this.analyser.fftSize}, 数据长度: ${this.visualizationData.length}`);
+                    return true;
+                } catch (error) {
+                    this.log(`音频可视化初始化失败: ${error.message}`);
+                    return false;
+                }
+            }
+
+            // 手动启动音频上下文
+            async resumeAudioContext() {
+                if (this.audioContext && this.audioContext.state === 'suspended') {
+                    try {
+                        await this.audioContext.resume();
+                        this.log('音频上下文已恢复');
+                        return true;
+                    } catch (error) {
+                        this.log(`恢复音频上下文失败: ${error.message}`);
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            // 启动音频上下文（用户交互）
+            async startAudioContext() {
+                this.log('用户点击启动音频按钮...');
+
+                try {
+                    // 初始化音频可视化
+                    this.initAudioVisualization();
+
+                    // 尝试恢复音频上下文
+                    const resumed = await this.resumeAudioContext();
+
+                    if (resumed) {
+                        this.log('音频上下文启动成功！');
+                        this.elements.visualizationStatus.textContent = '音频已启动';
+                        this.elements.visualizationStatus.style.color = '#00ff00';
+                        this.elements.audioHint.textContent = '音频上下文已启动，等待P2P连接建立...';
+                        this.elements.audioHint.style.color = '#28a745';
+
+                        // 如果有本地音频流，立即启动可视化
+                        if (this.localStream) {
+                            this.log('检测到本地音频流，启动可视化...');
+                            setTimeout(() => {
+                                this.startAudioVisualization(this.localStream);
+                            }, 500);
+                        } else {
+                            this.log('暂无本地音频流，等待P2P连接...');
+                        }
+                    } else {
+                        this.log('音频上下文启动失败');
+                        this.elements.visualizationStatus.textContent = '音频启动失败';
+                        this.elements.visualizationStatus.style.color = '#ff0000';
+                    }
+                } catch (error) {
+                    this.log(`启动音频上下文失败: ${error.message}`);
+                    this.elements.visualizationStatus.textContent = '音频启动失败';
+                    this.elements.visualizationStatus.style.color = '#ff0000';
+                }
+            }
+
+            // 开始音频可视化
+            async startAudioVisualization(audioStream) {
+                try {
+                    this.log('开始音频可视化...');
+
+                    // 检查音频流参数
+                    if (!audioStream) {
+                        this.log('错误：音频流参数为空');
+                        this.elements.visualizationStatus.textContent = '音频流为空';
+                        this.elements.visualizationStatus.style.color = '#ff0000';
+                        return;
+                    }
+
+                    if (!audioStream.getTracks) {
+                        this.log('错误：音频流不是有效的MediaStream对象');
+                        this.elements.visualizationStatus.textContent = '无效的音频流';
+                        this.elements.visualizationStatus.style.color = '#ff0000';
+                        return;
+                    }
+
+                    const tracks = audioStream.getTracks();
+                    this.log(`音频流轨道数量: ${tracks.length}`);
+
+                    if (tracks.length === 0) {
+                        this.log('错误：音频流中没有轨道');
+                        this.elements.visualizationStatus.textContent = '音频流无轨道';
+                        this.elements.visualizationStatus.style.color = '#ff0000';
+                        return;
+                    }
+
+                    // 检查是否有音频轨道
+                    const audioTracks = tracks.filter(track => track.kind === 'audio');
+                    if (audioTracks.length === 0) {
+                        this.log('错误：音频流中没有音频轨道');
+                        this.elements.visualizationStatus.textContent = '无音频轨道';
+                        this.elements.visualizationStatus.style.color = '#ff0000';
+                        return;
+                    }
+
+                    this.log(`音频轨道数量: ${audioTracks.length}`);
+
+                    // 如果音频上下文未初始化或状态不正确，重新初始化
+                    if (!this.audioContext || this.audioContext.state === 'closed') {
+                        this.log('音频上下文未初始化或已关闭，重新初始化...');
+                        this.initAudioVisualization();
+                    }
+
+                    // 确保音频上下文处于运行状态
+                    if (this.audioContext.state === 'suspended') {
+                        this.log('音频上下文被暂停，尝试恢复...');
+                        const resumed = await this.resumeAudioContext();
+
+                        if (!resumed) {
+                            this.log('音频上下文恢复失败');
+                            this.elements.visualizationStatus.textContent = '音频恢复失败';
+                            this.elements.visualizationStatus.style.color = '#ff0000';
+                            return;
+                        }
+                    }
+
+                    // 重新创建分析器（如果之前失败）
+                    if (!this.analyser || this.analyser.fftSize === 0) {
+                        this.log('重新创建音频分析器...');
+                        this.analyser = this.audioContext.createAnalyser();
+                        this.analyser.fftSize = 256;
+                        this.analyser.smoothingTimeConstant = 0.8;
+                        this.visualizationData = new Uint8Array(this.analyser.frequencyBinCount);
+                    }
+
+                    // 断开之前的连接
+                    if (this.audioSource) {
+                        this.audioSource.disconnect();
+                        this.audioSource = null;
+                    }
+
+                    // 创建音频源
+                    this.audioSource = this.audioContext.createMediaStreamSource(audioStream);
+                    this.audioSource.connect(this.analyser);
+
+                    this.isVisualizing = true;
+                    this.elements.visualizationStatus.textContent = '正在可视化';
+                    this.elements.visualizationStatus.style.color = '#00ff00';
+                    this.elements.toggleVisualizationBtn.textContent = '暂停可视化';
+
+                    // 开始绘制
+                    this.drawAudioVisualization();
+
+                    this.log('音频可视化已启动');
+                } catch (error) {
+                    this.log(`启动音频可视化失败: ${error.message}`);
+                    this.log(`错误详情: ${error.stack}`);
+
+                    this.elements.visualizationStatus.textContent = '可视化启动失败';
+                    this.elements.visualizationStatus.style.color = '#ff0000';
+                }
+            }
+
+            // 停止音频可视化
+            stopAudioVisualization() {
+                this.isVisualizing = false;
+
+                if (this.audioSource) {
+                    this.audioSource.disconnect();
+                    this.audioSource = null;
+                }
+
+                // 清空画布
+                const canvas = this.elements.audioCanvas;
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                this.log('音频可视化已停止');
+            }
+
+            // 切换音频可视化状态
+            toggleVisualization() {
+                if (this.isVisualizing) {
+                    this.isVisualizing = false;
+                    this.elements.toggleVisualizationBtn.textContent = '恢复可视化';
+                    this.elements.visualizationStatus.textContent = '已暂停';
+                    this.elements.visualizationStatus.style.color = '#ff9900';
+                    this.log('音频可视化已暂停');
+                } else {
+                    this.isVisualizing = true;
+                    this.elements.toggleVisualizationBtn.textContent = '暂停可视化';
+                    this.elements.visualizationStatus.textContent = '正在可视化';
+                    this.elements.visualizationStatus.style.color = '#00ff00';
+                    this.drawAudioVisualization();
+                    this.log('音频可视化已恢复');
+                }
+            }
+
+            // 绘制音频可视化
+            drawAudioVisualization() {
+                if (!this.isVisualizing) {
+                    return;
+                }
+
+                const canvas = this.elements.audioCanvas;
+                const ctx = canvas.getContext('2d');
+                const width = canvas.width;
+                const height = canvas.height;
+
+                // 清空画布
+                ctx.clearRect(0, 0, width, height);
+
+                // 检查分析器是否可用
+                if (!this.analyser) {
+                    // 显示错误信息
+                    ctx.fillStyle = '#ff0000';
+                    ctx.font = '16px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('音频分析器未初始化', width / 2, height / 2);
+                    ctx.fillText('请点击"启动音频"按钮', width / 2, height / 2 + 25);
+                    return;
+                }
+
+                // 检查音频上下文状态
+                if (this.audioContext && this.audioContext.state === 'suspended') {
+                    ctx.fillStyle = '#ff9900';
+                    ctx.font = '16px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('音频上下文被暂停', width / 2, height / 2);
+                    ctx.fillText('请点击"启动音频"按钮恢复', width / 2, height / 2 + 25);
+                    return;
+                }
+
+                // 获取频率数据
+                this.analyser.getByteFrequencyData(this.visualizationData);
+
+                // 计算音量级别
+                let sum = 0;
+                for (let i = 0; i < this.visualizationData.length; i++) {
+                    sum += this.visualizationData[i];
+                }
+                const average = sum / this.visualizationData.length;
+                const volumeLevel = average / 255;
+
+                // 显示真实音频模式标识
+                ctx.fillStyle = '#00ff00';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'left';
+                ctx.fillText('本地音频模式', 10, 15);
+
+                // 绘制背景渐变
+                const gradient = ctx.createLinearGradient(0, 0, width, 0);
+                gradient.addColorStop(0, '#001100');
+                gradient.addColorStop(0.5, '#003300');
+                gradient.addColorStop(1, '#001100');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, width, height);
+
+                // 绘制频谱柱状图
+                const barWidth = width / this.visualizationData.length;
+                const barSpacing = 1;
+                const actualBarWidth = barWidth - barSpacing;
+
+                for (let i = 0; i < this.visualizationData.length; i++) {
+                    const barHeight = (this.visualizationData[i] / 255) * height * 0.8;
+                    const x = i * barWidth;
+                    const y = height - barHeight;
+
+                    // 根据频率创建颜色渐变
+                    const hue = (i / this.visualizationData.length) * 120; // 绿色到黄色
+                    const saturation = 100;
+                    const lightness = 50 + (this.visualizationData[i] / 255) * 30;
+
+                    ctx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+                    ctx.fillRect(x, y, actualBarWidth, barHeight);
+                }
+
+                // 绘制中心波浪线
+                ctx.strokeStyle = '#00ff00';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                let x = 0;
+                for (let i = 0; i < this.visualizationData.length; i++) {
+                    const amplitude = (this.visualizationData[i] / 255) * height * 0.3;
+                    const y = height / 2 + Math.sin(i * 0.1 + Date.now() * 0.01) * amplitude;
+
+                    if (i === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+
+                    x += barWidth;
+                }
+
+                ctx.stroke();
+
+                // 绘制音量指示器
+                const volumeBarWidth = width * 0.8;
+                const volumeBarHeight = 20;
+                const volumeBarX = (width - volumeBarWidth) / 2;
+                const volumeBarY = height - 30;
+
+                // 背景
+                ctx.fillStyle = '#333333';
+                ctx.fillRect(volumeBarX, volumeBarY, volumeBarWidth, volumeBarHeight);
+
+                // 音量条
+                const volumeFillWidth = volumeBarWidth * volumeLevel;
+                const volumeGradient = ctx.createLinearGradient(volumeBarX, 0, volumeBarX + volumeFillWidth, 0);
+                volumeGradient.addColorStop(0, '#00ff00');
+                volumeGradient.addColorStop(0.5, '#ffff00');
+                volumeGradient.addColorStop(1, '#ff0000');
+
+                ctx.fillStyle = volumeGradient;
+                ctx.fillRect(volumeBarX, volumeBarY, volumeFillWidth, volumeBarHeight);
+
+                // 音量文字
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`音量: ${Math.round(volumeLevel * 100)}%`, width / 2, height - 10);
+
+                // 绘制中心线
+                ctx.strokeStyle = '#444444';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(0, height / 2);
+                ctx.lineTo(width, height / 2);
+                ctx.stroke();
+
+                // 显示调试信息
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'left';
+                ctx.fillText(`数据长度: ${this.visualizationData.length}`, 10, 30);
+                ctx.fillText(`平均音量: ${average.toFixed(1)}`, 10, 45);
+                ctx.fillText(`音量级别: ${(volumeLevel * 100).toFixed(1)}%`, 10, 60);
+
+                // 继续动画
+                requestAnimationFrame(() => this.drawAudioVisualization());
+            }
+
+            async createSession() {
+                this.log('开始创建会话...');
+                this.elements.createSessionBtn.disabled = true;
+                [this.elements.productKey, this.elements.deviceSn, this.elements.appId, this.elements.token].forEach(el => el.disabled = true);
+
+                try {
+                    // 确保MQTT已连接
+                    if (!this.mqttClient || !this.mqttClient.connected) {
+                        await this.connectMqtt();
+                    }
+
+                    // 1. 模拟调用API创建会话
+                    const sessionId = await this.createP2PSessionViaApi();
+                    if (!sessionId) {
+                        throw new Error("从API获取SessionId失败");
+                    }
+                    this.sessionId = sessionId;
+                    this.log(`API调用成功，获取会话ID: ${this.sessionId}`);
+                    this.updateP2pStatus('等待设备就绪...', 'waiting');
+
+                    // 2. 订阅App的信令主题
+                    this.subscribeToAppTopic();
+                    this.elements.endSessionBtn.disabled = false;
+
+                } catch (error) {
+                    this.log(`创建会话失败: ${error.message}`);
+                    this.elements.createSessionBtn.disabled = false;
+                    [this.elements.productKey, this.elements.deviceSn, this.elements.appId, this.elements.token].forEach(el => el.disabled = false);
+                }
+            }
+
+            endSession(reason = 'APP initiated disconnect') {
+                this.log(`正在结束会话: ${reason}`);
+                if (this.mqttClient) {
+                    if (this.pc) {
+                        this.sendSignalingMessage('bye', { reason });
+                    }
+                    // 无需在MQTT客户端上调用end()，如果我们想稍后创建新会话
+                }
+                this.closePeerConnection();
+                this.updateP2pStatus('会话已结束', 'disconnected');
+                this.elements.createSessionBtn.disabled = false;
+                this.elements.endSessionBtn.disabled = true;
+                [this.elements.productKey, this.elements.deviceSn, this.elements.appId, this.elements.token].forEach(el => el.disabled = false);
+                this.sessionId = null;
+            }
+
+            closePeerConnection() {
+                if (this.pc) {
+                    this.pc.close();
+                    this.pc = null;
+                }
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => track.stop());
+                    this.localStream = null;
+                }
+                if (this.remoteStream) {
+                    this.remoteStream.getTracks().forEach(track => track.stop());
+                    this.remoteStream = new MediaStream(); // 为下一次会话重新创建
+                }
+                this.elements.remoteVideo.srcObject = null;
+
+                // 停止音频可视化
+                this.stopAudioVisualization();
+            }
+
+            connectMqtt() {
+                return new Promise((resolve, reject) => {
+                    this.log(`正在连接到 MQTT Broker: ${this.mqttBroker}`);
+                    this.updateMqttStatus('连接中...', 'connecting');
+
+                    const options = {
+                        clientId: `APP`,
+                        username: 'APP',
+                        password: 'APP',
+                    };
+
+                    this.mqttClient = mqtt.connect(this.mqttBroker, options);
+
+                    this.mqttClient.on('connect', () => {
+                        this.updateMqttStatus('已连接', 'connected');
+                        this.log('成功连接到 MQTT Broker。');
+                        resolve();
+                    });
+
+                    this.mqttClient.on('message', (topic, message) => {
+                        const payload = JSON.parse(message.toString());
+                        this.log(`⬇️ [MQTT-IN] Topic: ${topic}\nPayload: ${JSON.stringify(payload, null, 2)}`);
+                        this.handleSignalingMessage(payload);
+                    });
+
+                    this.mqttClient.on('error', (err) => {
+                        this.log(`MQTT 错误: ${err}`);
+                        this.updateMqttStatus('连接错误', 'disconnected');
+                        reject(err);
+                    });
+
+                    this.mqttClient.on('close', () => {
+                        this.log('MQTT 连接已关闭。');
+                        this.updateMqttStatus('已断开', 'disconnected');
+                    });
+                });
+            }
+
+            subscribeToAppTopic() {
+                const pk = this.elements.productKey.value;
+                const sn = this.elements.deviceSn.value;
+                const appTopic = `dl/${pk}/${sn}/app/${this.sessionId}/p2p/signal/sub`;
+
+                this.mqttClient.subscribe(appTopic, (err) => {
+                    if (!err) {
+                        this.log(`已订阅APP信令主题: ${appTopic}`);
+                        this.log('会话已建立，现已通过模拟API通知后端，等待设备 "Ready" 信号...');
+                    } else {
+                        this.log(`订阅APP信令主题失败: ${err}`);
+                        this.endSession(`订阅MQTT失败: ${err}`);
+                    }
+                });
+            }
+
+            // 修正: 真正实现API调用，而不是模拟
+            async createP2PSessionViaApi() {
+                this.log('发起 API 调用: /api/v1/signal/session');
+
+                const P2P_API_BASE_URL = "http://localhost:8067/api/v1/signal"; // 与Java代码一致
+                const url = `${P2P_API_BASE_URL}/session`;
+                const requestBody = {
+                    deviceSn: this.elements.deviceSn.value
+                };
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer mock_token_${this.elements.appId.value}`,
+                    'source': 'IOS',
+                    'token': this.elements.token.value
+                };
+
+                this.log(`--> HTTP POST请求: ${url}`);
+
+                try {
+                    // 这是真实的API调用
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: headers,
+                        body: JSON.stringify(requestBody)
+                    });
+
+                    this.log(`<-- HTTP响应状态: ${response.status}`);
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`API响应错误: ${response.status} ${response.statusText}. ${errorText}`);
+                    }
+
+                    const responseData = await response.json();
+                    this.log(`<-- HTTP响应内容: ${JSON.stringify(responseData, null, 2)}`);
+
+                    if (responseData.code === 0 && responseData.data && responseData.data.sessionId) {
+                        // 解析并应用服务端下发的RTC配置
+                        this.parseAndApplyRtcConfig(responseData.data);
+                        this.log(`后端现在应该已经通过MQTT向设备 ${this.elements.deviceSn.value} 推送了P2P配置。`);
+                        return responseData.data.sessionId;
+                    } else {
+                        throw new Error(`API返回数据格式不正确: ${JSON.stringify(responseData)}`);
+                    }
+                } catch (error) {
+                    this.log(`API调用失败: ${error.message}`);
+                    this.log("错误原因分析: 最常见的原因是后端的 'http://localhost:8067' 服务没有配置CORS策略，导致浏览器出于安全原因阻止了本次跨域请求。请检查浏览器控制台(F12)的错误详情。");
+                    throw error; // 将错误抛出，让上层处理UI回滚
+                }
+            }
+
+            // 新增: 解析并应用服务端下发的RTC配置
+            parseAndApplyRtcConfig(apiData) {
+                try {
+                    this.log('=== 解析服务端API下发的RTC配置 ===');
+
+                    if (apiData.rtcConfiguration) {
+                        // 解析服务端下发的完整RTC配置
+                        const parsedConfig = JSON.parse(apiData.rtcConfiguration);
+                        this.log(`原始服务端配置: ${JSON.stringify(parsedConfig, null, 2)}`);
+
+                        // 为TURN服务器添加APP端认证信息
+                        if (parsedConfig.iceServers) {
+                            this.log(`处理ICE服务器配置...`);
+                            parsedConfig.iceServers.forEach((server, index) => {
+                                if (server.urls.startsWith('turn:')) {
+                                    this.log(`配置TURN服务器 ${index + 1}: ${server.urls}`);
+                                    // 确保使用udp传输
+                                    if (!server.urls.includes('?')) {
+                                        server.urls += '?transport=udp';
+                                    }
+                                    server.username = 'APP'; // APP端认证
+                                    server.credential = 'APP'; // APP端认证
+                                    server.credentialType = 'password';
+                                    this.log(`TURN服务器 ${index + 1} 配置完成`);
+                                } else if (server.urls.startsWith('stun:')) {
+                                    this.log(`STUN服务器 ${index + 1}: ${server.urls}`);
+                                }
+                            });
+                        }
+
+                        // 应用API响应中的其他RTC配置参数
+                        if (apiData.iceTransportPolicy) {
+                            parsedConfig.iceTransportPolicy = apiData.iceTransportPolicy;
+                            this.log(`应用iceTransportPolicy: ${apiData.iceTransportPolicy}`);
+                        }
+                        if (apiData.iceCandidatePoolSize) {
+                            parsedConfig.iceCandidatePoolSize = apiData.iceCandidatePoolSize;
+                            this.log(`应用iceCandidatePoolSize: ${apiData.iceCandidatePoolSize}`);
+                        }
+                        if (apiData.bundlePolicy) {
+                            parsedConfig.bundlePolicy = apiData.bundlePolicy;
+                            this.log(`应用bundlePolicy: ${apiData.bundlePolicy}`);
+                        }
+                        if (apiData.rtcpMuxPolicy) {
+                            parsedConfig.rtcpMuxPolicy = apiData.rtcpMuxPolicy;
+                            this.log(`应用rtcpMuxPolicy: ${apiData.rtcpMuxPolicy}`);
+                        }
+
+                        this.rtcConfig = parsedConfig;
+                        this.log(`=== 服务端RTC配置应用成功 ===`);
+                        this.log(`最终配置: ${JSON.stringify(this.rtcConfig, null, 2)}`);
+                    } else if (apiData.stunServers || apiData.turnServers) {
+                        // 根据API响应中的服务器信息构建RTC配置
+                        this.log(`根据API响应构建RTC配置...`);
+                        this.log(`STUN服务器: ${JSON.stringify(apiData.stunServers)}`);
+                        this.log(`TURN服务器: ${JSON.stringify(apiData.turnServers)}`);
+
+                        const iceServers = [];
+
+                        // 添加STUN服务器
+                        if (apiData.stunServers && apiData.stunServers.length > 0) {
+                            apiData.stunServers.forEach(serverUrl => {
+                                iceServers.push({
+                                    urls: serverUrl
+                                });
+                                this.log(`添加STUN服务器: ${serverUrl}`);
+                            });
+                        }
+
+                        // 添加TURN服务器
+                        if (apiData.turnServers && apiData.turnServers.length > 0) {
+                            apiData.turnServers.forEach(serverUrl => {
+                                const turnServer = {
+                                    urls: serverUrl
+                                };
+
+                                // 确保使用udp传输
+                                if (!serverUrl.includes('?')) {
+                                    turnServer.urls += '?transport=udp';
+                                }
+
+                                // 添加APP端认证信息
+                                turnServer.username = 'APP';
+                                turnServer.credential = 'APP';
+                                turnServer.credentialType = 'password';
+
+                                iceServers.push(turnServer);
+                                this.log(`添加TURN服务器: ${turnServer.urls}`);
+                            });
+                        }
+
+                        this.rtcConfig = {
+                            iceServers: iceServers,
+                            iceTransportPolicy: apiData.iceTransportPolicy || "all",
+                            iceCandidatePoolSize: apiData.iceCandidatePoolSize || 10,
+                            bundlePolicy: apiData.bundlePolicy || "max-bundle",
+                            rtcpMuxPolicy: apiData.rtcpMuxPolicy || "require"
+                        };
+
+                        this.log(`=== 根据API响应构建的RTC配置应用成功 ===`);
+                        this.log(`最终配置: ${JSON.stringify(this.rtcConfig, null, 2)}`);
+                    } else {
+                        throw new Error('服务端响应中未包含rtcConfiguration、stunServers或turnServers字段');
+                    }
+                } catch (error) {
+                    this.log(`解析RTC配置失败: ${error.message}`);
+                    this.log('=== 使用默认配置作为备用方案 ===');
+
+                    // 备用配置
+                    this.rtcConfig = {
+                        iceServers: [
+                            {
+                                urls: "stun:223.254.128.13:3478"
+                            }
+                        ],
+                        iceTransportPolicy: "all",
+                        iceCandidatePoolSize: 10,
+                        bundlePolicy: "max-bundle",
+                        rtcpMuxPolicy: "require"
+                    };
+                    this.log(`备用配置: ${JSON.stringify(this.rtcConfig, null, 2)}`);
+                }
+            }
+
+            async startCall() {
+                try {
+                    this.log('设备已就绪，开始P2P连接流程...');
+                    this.updateP2pStatus('正在初始化连接...', 'connecting');
+
+                    // 检查RTC配置是否已获取
+                    if (!this.rtcConfig) {
+                        throw new Error('RTC配置未获取，无法创建PeerConnection');
+                    }
+
+                    this.log(`=== 使用服务端API下发的RTC配置创建PeerConnection ===`);
+                    this.pc = new RTCPeerConnection(this.rtcConfig);
+                    this.setupPeerConnectionEvents();
+
+                    // 使用Transceiver明确声明我们想要接收视频和发送音频
+                    this.pc.addTransceiver('video', { direction: 'recvonly' });
+                    const audioTransceiver = this.pc.addTransceiver('audio', { direction: 'sendrecv' });
+
+                    this.log('正在获取本地音频...');
+                    this.localStream = await navigator.mediaDevices.getUserMedia({
+                        video: false,
+                        audio: {
+                            echoCancellation: false,
+                            noiseSuppression: false,
+                            autoGainControl: false
+                        }
+                    });
+
+                    const audioTrack = this.localStream.getAudioTracks()[0];
+                    if (audioTrack) {
+                        this.log(`音频轨道信息: ${audioTrack.label}, 启用状态: ${audioTrack.enabled}, 静音状态: ${audioTrack.muted}`);
+                        this.log(`音频轨道详细信息:`, audioTrack);
+
+                        // 检查transceiver状态
+                        this.log(`Transceiver状态:`, audioTransceiver);
+                        this.log(`Transceiver方向: ${audioTransceiver.direction}`);
+                        this.log(`Transceiver当前轨道:`, audioTransceiver.sender.track);
+
+                        audioTransceiver.sender.replaceTrack(audioTrack);
+                        this.log(`已添加本地音频轨道用于发送`);
+
+                        // 验证轨道是否成功添加
+                        setTimeout(() => {
+                            this.log(`验证轨道添加结果:`, audioTransceiver.sender.track);
+                            this.log(`Transceiver最终方向: ${audioTransceiver.direction}`);
+                        }, 100);
+
+                        // 监控音频轨道状态
+                        audioTrack.onended = () => this.log('音频轨道已结束');
+                        audioTrack.onmute = () => this.log('音频轨道已静音');
+                        audioTrack.onunmute = () => this.log('音频轨道已取消静音');
+
+                        // 启动本地音频可视化
+                        setTimeout(() => {
+                            this.log('启动本地音频可视化...');
+                            this.startAudioVisualization(this.localStream);
+                        }, 1000);
+                    } else {
+                        this.log('警告：未获取到音频轨道');
+                    }
+
+                    const offer = await this.pc.createOffer();
+                    this.log(`Offer SDP内容:`);
+                    this.log(offer.sdp);
+
+                    await this.pc.setLocalDescription(offer);
+
+                    this.updateP2pStatus('Offer已创建，正在发送...', 'connecting');
+                    this.sendSignalingMessage('offer', { sdp: offer.sdp });
+                } catch (error) {
+                    this.log(`开始呼叫失败: ${error}`);
+                    this.endSession(`开始呼叫失败: ${error.message}`);
+                }
+            }
+
+            setupPeerConnectionEvents() {
+                let iceCandidates = []; // 收集所有ICE候选者
+                let iceGatheringComplete = false; // ICE收集完成标志
+
+                this.pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        this.log(`收集ICE候选者: ${event.candidate.candidate}`);
+                        iceCandidates.push(event.candidate);
+                    } else {
+                        this.log('ICE候选者收集完成，准备一次性发送');
+                        iceGatheringComplete = true;
+
+                        // 一次性发送所有收集到的ICE候选者
+                        if (iceCandidates.length > 0) {
+                            this.log(`一次性发送 ${iceCandidates.length} 个ICE候选者`);
+                            this.sendSignalingMessage('candidates', {
+                                candidates: iceCandidates
+                            });
+                        }
+                    }
+                };
+
+                // 添加ICE候选者错误监控
+                this.pc.onicecandidateerror = (event) => {
+                    this.log(`ICE候选者错误: ${event.errorText}`);
+                    this.log(`错误代码: ${event.errorCode}`);
+                    this.log(`URL: ${event.url}`);
+                    this.log(`地址: ${event.address}:${event.port}`);
+                };
+
+                this.pc.oniceconnectionstatechange = () => {
+                    const state = this.pc.iceConnectionState;
+                    this.log(`ICE 连接状态: ${state}`);
+
+                    // 添加更详细的状态信息
+                    if (state === 'checking') {
+                        this.log('ICE正在检查候选者连接性...');
+                    } else if (state === 'failed') {
+                        this.log('ICE连接失败，可能的原因：');
+                        this.log('1. TURN服务器认证失败');
+                        this.log('2. 网络连接问题');
+                        this.log('3. 防火墙阻止连接');
+                        this.log('4. TURN服务器配置错误');
+                    }
+                };
+
+                this.pc.ontrack = (event) => {
+                    this.log(`接收到远程轨道: ${event.track.kind}`);
+                    this.remoteStream.addTrack(event.track);
+                    // 一个更健壮的处理轨道的方法是构建一个新的流。
+                    if (this.elements.remoteVideo.srcObject !== this.remoteStream) {
+                        this.log('正在将媒体流附加到远程视频元素。');
+                        this.elements.remoteVideo.srcObject = this.remoteStream;
+                    }
+                };
+
+                this.pc.onconnectionstatechange = () => {
+                    const state = this.pc.connectionState;
+                    this.log(`P2P 连接状态: ${state}`);
+                    switch (state) {
+                        case 'connected':
+                            this.updateP2pStatus('P2P已连接', 'connected');
+
+                            // P2P连接成功后，尝试启动音频可视化
+                            setTimeout(() => {
+                                this.log('P2P连接已建立，尝试启动音频可视化...');
+                                if (this.localStream) {
+                                    this.log('检测到本地音频流，启动可视化...');
+                                    this.startAudioVisualization(this.localStream);
+                                } else {
+                                    this.log('本地音频流不可用，等待音频流建立...');
+                                    this.elements.visualizationStatus.textContent = '等待音频流...';
+                                    this.elements.visualizationStatus.style.color = '#ff9900';
+                                }
+                            }, 1000);
+                            break;
+                        case 'disconnected':
+                        case 'failed':
+                        case 'closed':
+                            if (this.sessionId) { // 只有在会话中才触发
+                                this.endSession('P2P连接已断开');
+                            }
+                            break;
+                    }
+                };
+            }
+
+            sendSignalingMessage(type, dataPayload = {}) {
+                if (!this.mqttClient || !this.mqttClient.connected || !this.sessionId) {
+                    this.log(`无法发送信令 (${type})：MQTT未连接或无会话。`);
+                    return;
+                }
+                const pk = this.elements.productKey.value;
+                const sn = this.elements.deviceSn.value;
+                const targetTopic = `dl/${pk}/${sn}/device/${this.sessionId}/p2p/signal/sub`;
+
+                const message = {
+                    cmd: 'WEB_RTC',
+                    ts: Date.now(),
+                    msgId: `app_${Date.now()}`,
+                    data: {
+                        type,
+                        sessionId: this.sessionId,
+                        from: this.elements.appId.value,
+                        to: sn,
+                        ...dataPayload
+                    }
+                };
+                const msgString = JSON.stringify(message);
+                this.log(`⬆️ [MQTT-OUT] Topic: ${targetTopic}\nPayload: ${msgString}`);
+                this.mqttClient.publish(targetTopic, msgString);
+            }
+
+            async handleSignalingMessage(message) {
+                const data = message.data;
+                if (!data || data.sessionId !== this.sessionId) {
+                    this.log('信令消息无数据或会话ID不匹配，已忽略。');
+                    return;
+                }
+
+                const { type } = data;
+                this.log(`处理信令: ${type}`);
+
+                try {
+                    switch (type) {
+                        case 'ready':
+                            this.startCall();
+                            break;
+                        case 'answer':
+                            if (this.pc) {
+                                await this.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
+                                this.updateP2pStatus('收到Answer，连接中...', 'connecting');
+                            }
+                            break;
+                        case 'candidate':
+                            if (this.pc && this.pc.remoteDescription) {
+                                await this.pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+                            }
+                            break;
+                        case 'candidates':
+                            if (this.pc && this.pc.remoteDescription && data.candidates) {
+                                this.log(`批量处理 ${data.candidates.length} 个ICE候选者`);
+                                for (const candidateData of data.candidates) {
+                                    try {
+                                        await this.pc.addIceCandidate(new RTCIceCandidate(candidateData));
+                                    } catch (error) {
+                                        this.log(`添加ICE候选者失败: ${error.message}`);
+                                    }
+                                }
+                                this.log('批量ICE候选者处理完成');
+                            }
+                            break;
+                        case 'permission_request':
+                            if (data.type === 'create_permission') {
+                                this.log('收到权限请求，发送确认...');
+                                this.sendSignalingMessage('permission_response', {
+                                    type: 'permission_granted',
+                                    target: data.from
+                                });
+                            }
+                            break;
+                        case 'permission_response':
+                            if (data.type === 'permission_granted') {
+                                this.log('权限请求已被确认');
+                            }
+                            break;
+                        case 'connected':
+                            this.log('设备确认P2P连接已建立。');
+                            this.updateP2pStatus('P2P已连接', 'connected');
+                            break;
+                        case 'bye':
+                            this.endSession('收到设备断开信号');
+                            break;
+                    }
+                } catch (error) {
+                    this.log(`处理信令 ${type} 失败: ${error}`);
+                    this.endSession(`处理信令失败: ${error.message}`);
+                }
+            }
+        }
+
+        window.p2pApp = new P2PApp();
+    </script>
+</body>
+
+</html>

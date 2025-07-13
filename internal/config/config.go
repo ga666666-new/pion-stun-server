@@ -37,6 +37,8 @@ type TURNConfig struct {
 	RelayRanges  []string `mapstructure:"relay_ranges"`
 	MaxLifetime  int      `mapstructure:"max_lifetime"`
 	DefaultTTL   int      `mapstructure:"default_ttl"`
+	// 调试选项：遇到权限错误时终止程序
+	TerminateOnPermissionError bool `mapstructure:"terminate_on_permission_error"`
 }
 
 // HealthConfig holds health check configuration
@@ -161,6 +163,7 @@ func setDefaults() {
 	viper.SetDefault("server.turn.relay_ranges", []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"})
 	viper.SetDefault("server.turn.max_lifetime", 3600)
 	viper.SetDefault("server.turn.default_ttl", 600)
+	viper.SetDefault("server.turn.terminate_on_permission_error", false)
 	viper.SetDefault("server.health.port", 8080)
 	viper.SetDefault("server.health.address", "0.0.0.0")
 	viper.SetDefault("server.health.path", "/health")

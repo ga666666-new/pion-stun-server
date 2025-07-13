@@ -59,7 +59,7 @@ For detailed information, see [Enhanced Logging Documentation](docs/ENHANCED_LOG
 
 ### Prerequisites
 
-- Go 1.21 or higher
+- Go 1.24 or higher (recommended)
 - MongoDB 4.4 or higher
 - Docker (optional)
 
@@ -71,7 +71,12 @@ For detailed information, see [Enhanced Logging Documentation](docs/ENHANCED_LOG
    cd pion-stun-server
    ```
 
-2. **Build the project**:
+2. **Set up Go 1.24 environment** (if needed):
+   ```bash
+   ./scripts/setup-go1.24.sh
+   ```
+
+3. **Build the project**:
    ```bash
    make build
    ```

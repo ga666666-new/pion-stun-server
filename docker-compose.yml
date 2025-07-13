@@ -31,8 +31,10 @@ services:
     environment:
       - MONGODB_URI=mongodb://admin:password@mongodb:27017/stun_turn?authSource=admin
       - LOGGING_LEVEL=info
-    volumes:
-      - ./configs/config.yaml:/app/configs/config.yaml:ro
+    # 配置文件现在已经打包到镜像中，不需要外部挂载
+    # 如果需要自定义配置，可以取消注释下面的行：
+    # volumes:
+    #   - ./configs/config.yaml:/app/config/config.yaml:ro
     networks:
       - stun-turn-network
     healthcheck:
